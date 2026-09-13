@@ -1,0 +1,35 @@
+# CMake build directories
+cmake-build-*/
+build/
+out/
+
+# CLion / JetBrains IDE
+.idea/
+*.iml
+
+# Compiled object files
+*.o
+*.obj
+*.gch
+*.pch
+
+# Compiled libraries and executables
+*.a
+*.lib
+*.so
+*.so.*
+*.dylib
+*.dll
+*.exe
+*.out
+*.app
+
+# Debug and release artifacts
+*.dSYM/
+*.debug
+*.release
+
+# Editor and OS files
+.vscode/
+.DS_Store
+Thumbs.db
