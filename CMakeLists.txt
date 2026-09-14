@@ -7,5 +7,4 @@ add_executable(Bimodal_Content_Defined_Chunking_for_Backup_Streams
         src/Baseline.cpp
         src/DataAndMethod.h
         src/DataAndMethod.cpp
-        src/ChunkStore.h
         src/ChunkStore.cpp)

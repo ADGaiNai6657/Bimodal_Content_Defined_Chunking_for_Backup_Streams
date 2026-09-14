@@ -2,7 +2,7 @@
 // Created by ADGaiNai6657 on 2026/9/14.
 //
 
-#include "ChunkStore.h"
+#include "DataAndMethod.h"
 
 //输入string_viewm,返回哈希值
 auto getHashValue(Chunk chunk) -> std::uint64_t {

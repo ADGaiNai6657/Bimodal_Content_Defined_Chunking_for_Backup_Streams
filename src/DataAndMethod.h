@@ -9,11 +9,16 @@
 #include <cstdint>
 #include <string>
 #include <string_view>
+#include <memory>
 #include <unordered_map>
+#include <deque>
 #include <vector>
 
+struct Chunk;
+
+using ChunkHash = std::uint64_t;
+
 using ull = unsigned long long;
-// using ChunkHash = std::uint64_t;
 
 /*TTTD-S 参数：迁移自 TTTD-S_Experiments/TTTD-S_Algorithm.cpp*/
 inline constexpr std::size_t CONST_VALUE_MAIN_D = 540;        // 切换前使用的主除数。
@@ -27,6 +32,14 @@ inline constexpr std::size_t SWITCH_P = 1600;                 // 块超过该大
 inline std::vector<std::vector<ull>> vPosition;
 inline std::vector<std::vector<ull>> vDiff;
 // inline std::unordered_map<std::size_t, Chunk> umChunk;
+
+auto getHashValue(std::string_view content) -> std::uint64_t;
+
+auto getSubString(Chunk chunk) -> std::string_view;
+
+auto chunkStore(std::string_view content) -> Chunk*;
+
+auto isExist(ChunkHash hash) -> bool;
 
 ChunkHash getChunkHash(std::string_view data);
 
@@ -43,5 +56,21 @@ void pFinder(std::string& str);
 void strPushback(std::vector<std::string>& str);
 
 // std::size_t lengthCalculator(Chunk chunk);
+
+struct Chunk {
+    ChunkHash hash;
+    std::string data;
+    std::size_t length;
+};
+
+struct ChunkRef {
+    Chunk* chunk;
+    std::size_t offset;
+};
+
+class ChunkStore {
+};
+
+inline std::unordered_map<ChunkHash,Chunk> chunks;
 
 #endif //BIMODAL_CONTENT_DEFINED_CHUNKING_FOR_BACKUP_STREAMS_DATA_H
