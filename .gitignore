@@ -35,5 +35,5 @@ out/
 Thumbs.db
 
 # Large dataset archives (too large for git)
-#Dataset/DataSet_1/
-#Dataset/DataSet_2/
+Dataset/DataSet_1/
+Dataset/DataSet_2/
