@@ -3,9 +3,14 @@
 //
 #include <iostream>
 #include <fstream>
+#include <utility>
 
 #include "DataAndMethod.h"
 
+// 内部哈希原语（仅本编译单元使用，故只做前向声明）。
+auto getHashValue(std::string_view str) -> std::uint64_t;
+
+/** 内容哈希入口：把窗口哈希结果统一成 ChunkHash 类型。 */
 ChunkHash getChunkHash(const std::string_view str) {
     return static_cast<ChunkHash>(getHashValue(str));
 }
@@ -24,7 +29,7 @@ auto getSubString(const std::string_view str, const std::size_t end, const std::
 }
 
 auto getSubString(const Chunk &chunk) -> std::string_view {
-    return static_cast<std::string_view>(chunk.data);
+    return static_cast<std::string_view>(chunk.data); // 零拷贝视图，供哈希与比较使用。
 }
 
 /** Through the vector to calculate the diff between every beside num*/
@@ -41,6 +46,17 @@ std::vector<std::vector<ull>> diffCalculator(std::vector<std::vector<ull>> v) {
     return result;
 }
 
+// 把 [begin, end) 切片交给 ChunkStore 去重，并记录一条出现记录。
+//每一次发射都将调用chunkStore()函数
+void emitChunk(const std::string& data, std::size_t begin, std::size_t end) {
+    if (end <= begin) {
+        return; // 跳过 0 长尾块。
+    }
+    Chunk chunk{0, data.substr(begin, end - begin), end - begin};
+    Chunk* stored = chunkStore(std::move(chunk));
+    vChunks.back().push_back(ChunkRef{stored, begin});
+}
+
 /** Find TTTD-S chunk boundaries for every loaded file. */
 void pFinder(std::vector<std::string>& str) {
     for (auto& s : str) {
@@ -55,6 +71,7 @@ void pFinder(std::vector<std::string>& str) {
 void pFinder(const std::string& str) {
     vPosition.emplace_back();
     std::vector<ull>& boundaries = vPosition.back();
+    vChunks.emplace_back();
 
     std::size_t main_D = CONST_VALUE_MAIN_D;     // 当前生效的主除数。
     std::size_t second_D = CONST_VALUE_SECOND_D; // 当前生效的备份除数。
@@ -79,6 +96,7 @@ void pFinder(const std::string& str) {
         }
 
         if (hash % main_D == main_D - 1) {
+            emitChunk(str, last_P, p); // 发射 [last_P, p) 为一整块。
             boundaries.push_back(p); // 优先使用主规则边界。
             backupBreak = 0;
             last_P = p;
@@ -92,10 +110,12 @@ void pFinder(const std::string& str) {
         }
 
         if (backupBreak != 0) {
+            emitChunk(str, last_P, backupBreak); // 发射 [last_P, backupBreak) 为一块。
             last_P = backupBreak;              // 使用已保存的备份边界。
             boundaries.push_back(backupBreak);
             backupBreak = 0;
         } else {
+            emitChunk(str, last_P, p);           // 发射 [last_P, p) 为一块。
             boundaries.push_back(p);           // 否则在最大块长处强制切分。
             last_P = p;
             backupBreak = 0;
@@ -103,8 +123,11 @@ void pFinder(const std::string& str) {
         main_D = CONST_VALUE_MAIN_D;
         second_D = CONST_VALUE_SECOND_D;
     }
+
+    emitChunk(str, last_P, str.size()); // 补上尾部剩余数据。
 }
 
+// 旧版冒烟测试：按行读 Dataset/temp.txt 到 str（正式流程请用 Baseline 的二进制整读）。
 void strPushback(std::vector<std::string>& str) {
     std::ifstream ifs("../Dataset/temp.txt");
     if (!ifs.is_open()) {
@@ -118,7 +141,7 @@ void strPushback(std::vector<std::string>& str) {
     }
 }
 
-//输入Chunk,返回一段String_view
+// 输入 Chunk，返回其内容视图（与 getSubString(const Chunk&) 等价，保留供调用方使用）。
 auto getString(const Chunk& chunk) -> std::string_view {
     return chunk.data;
 }
