@@ -12,7 +12,7 @@
 
 #include "DataAndMethod.h"
 
-/*为方便起见，这里直接复用BSW算法作为论文Baseline实现*/
+/*TTTD-S 算法核心迁移自 TTTD-S_Experiments*/
 
 using ull = unsigned long long;
 
