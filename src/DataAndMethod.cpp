@@ -6,21 +6,25 @@
 
 #include "DataAndMethod.h"
 
-ChunkHash getChunkHash(std::string_view data) {
-    return static_cast<ChunkHash>(getHashValue(data));
+ChunkHash getChunkHash(const std::string_view str) {
+    return static_cast<ChunkHash>(getHashValue(str));
 }
 
 /** Calculate the hash value of one data window. */
-std::size_t getHashValue(std::string_view str) {
-    return std::hash<std::string_view>{}(str);
+auto getHashValue(const std::string_view content)-> std::uint64_t {
+    return std::hash<std::string_view>{}(content);
 }
 
 /** Return the window ending at the given position. */
-std::string_view getSubString(std::string_view str, std::size_t end, std::size_t length) {
+auto getSubString(const std::string_view str, const std::size_t end, const std::size_t length) -> std::string_view {
     if (end < length) {
         return str.substr(0, end); // Use all available bytes at the start.
     }
     return str.substr(end - length, length); // Keep a fixed-size window.
+}
+
+auto getSubString(const Chunk &chunk) -> std::string_view {
+    return static_cast<std::string_view>(chunk.data);
 }
 
 /** Through the vector to calculate the diff between every beside num*/
@@ -48,7 +52,7 @@ void pFinder(std::vector<std::string>& str) {
  * TTTD-S 核心：对单个数据流产生边界，结果存入 vPosition 的最后一组。
  * 逻辑迁移自 TTTD-S_Experiments/TTTD-S_Algorithm.cpp 的 pFinder。
  */
-void pFinder(std::string& str) {
+void pFinder(const std::string& str) {
     vPosition.emplace_back();
     std::vector<ull>& boundaries = vPosition.back();
 
@@ -58,8 +62,8 @@ void pFinder(std::string& str) {
     std::size_t backupBreak = 0;                 // 最新的备份边界候选。
 
     for (std::size_t p = 0; p <= str.length(); p++) {
-        std::string_view subString = getSubString(str, p, MY_LENGTH);
-        std::size_t hash = getHashValue(subString); // 对当前窗口取哈希。
+        const std::string_view subString = getSubString(str, p, MY_LENGTH);
+        const std::size_t hash = getHashValue(subString); // 对当前窗口取哈希。
 
         if (p - last_P < MIN_T) {
             continue; // 保持最小块长。
@@ -102,19 +106,19 @@ void pFinder(std::string& str) {
 }
 
 void strPushback(std::vector<std::string>& str) {
-    std::string line;
-
     std::ifstream ifs("../Dataset/temp.txt");
     if (!ifs.is_open()) {
         std::cerr << "404\n";
     }
     if (ifs.is_open()) {
+        std::string line;
         while (std::getline(ifs,line)) {
             str.push_back(line);
         }
     }
 }
 
-std::size_t lengthCalculator(Chunk chunk) {
-    return chunk.end - chunk.start;
+//输入Chunk,返回一段String_view
+auto getString(const Chunk& chunk) -> std::string_view {
+    return chunk.data;
 }

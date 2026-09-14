@@ -35,23 +35,23 @@ inline std::vector<std::vector<ull>> vDiff;
 
 auto getHashValue(std::string_view content) -> std::uint64_t;
 
-auto getSubString(Chunk chunk) -> std::string_view;
+// auto chunkStore(std::string_view content) -> Chunk*;
 
-auto chunkStore(std::string_view content) -> Chunk*;
+auto chunkStore(Chunk chunk) -> Chunk*;
 
 auto isExist(ChunkHash hash) -> bool;
 
-ChunkHash getChunkHash(std::string_view data);
+ChunkHash getChunkHash(std::string_view str);
 
 std::string_view getSubString(std::string_view str, std::size_t end, std::size_t length);
 
-std::size_t getHashValue(std::string_view str);
+auto getSubString(const Chunk &chunk) -> std::string_view;
 
 std::vector<std::vector<ull>> diffCalculator(std::vector<std::vector<ull>> v);
 
 void pFinder(std::vector<std::string>& str);
 
-void pFinder(std::string& str);
+void pFinder(const std::string& str);
 
 void strPushback(std::vector<std::string>& str);
 
