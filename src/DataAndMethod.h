@@ -23,13 +23,13 @@ inline constexpr std::size_t MIN_T = 460;                     // 该大小之前
 inline constexpr std::size_t MY_LENGTH = 48;                  // 滑动窗口哈希的字节数。
 inline constexpr std::size_t SWITCH_P = 1600;                 // 块超过该大小后切换除数。
 
-//数据结构
-struct Chunk {
-    std::size_t start;       // 起始位置，包含
-    std::size_t end;         // 结束位置，不包含
-    std::size_t length;      // chunk 长度，length = end - start
-    ChunkHash hash;        // 内容哈希
-};
+// //数据结构
+// struct Chunk {
+//     std::size_t start;       // 起始位置，包含
+//     std::size_t end;         // 结束位置，不包含
+//     std::size_t length;      // chunk 长度，length = end - start
+//     ChunkHash hash;        // 内容哈希
+// };
 
 inline std::vector<std::vector<ull>> vPosition;
 inline std::vector<std::vector<ull>> vDiff;
