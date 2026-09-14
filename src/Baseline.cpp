@@ -16,15 +16,14 @@
 
 using ull = unsigned long long;
 
-const int D=1000;
-const int myLength=48;
 std::vector<std::string> str;
 // std::vector<int> vPosition;
 
 auto resolver() {
     strPushback(str);
     for (auto it : str) {
-
+        pFinder(it);
+        diffCalculator(vPosition);
     }
 }
 

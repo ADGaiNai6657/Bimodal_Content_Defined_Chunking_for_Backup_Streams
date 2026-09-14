@@ -10,10 +10,13 @@
 
 using ull = unsigned long long;
 
+inline constexpr int D = 4;
+inline constexpr int myLength = 3;
+
 struct Chunk;
 
-std::vector<ull> vPosition;
-std::vector<ull> vDiff;
+std::vector<std::vector<ull>> vPosition;
+std::vector<std::vector<ull>> vDiff;
 std::unordered_map<ull,Chunk> umChunk;
 
 //数据结构
@@ -24,13 +27,15 @@ struct Chunk {
     std::string hash;        // 内容哈希
 };
 
-std::string_view getSubString(std::string_view str, int end, int length);
+auto getSubString(std::string_view str, int end, int length);
 
-ull getHashValue(std::string_view str);
+auto getHashValue(std::string_view str);
 
-auto diffCalculator(std::vector<int> v);
+auto diffCalculator(std::vector<std::vector<ull>> v);
 
 void pFinder(std::vector<std::string>& str);
+
+void pFinder(std::string& str);
 
 void strPushback(std::vector<std::string>& str);
 
