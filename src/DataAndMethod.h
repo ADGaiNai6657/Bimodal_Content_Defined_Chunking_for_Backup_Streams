@@ -6,13 +6,14 @@
 #define BIMODAL_CONTENT_DEFINED_CHUNKING_FOR_BACKUP_STREAMS_DATA_H
 
 #include <cstddef>
+#include <cstdint>
 #include <string>
 #include <string_view>
 #include <unordered_map>
 #include <vector>
 
 using ull = unsigned long long;
-using ChunkHash = std::uint64_t;
+// using ChunkHash = std::uint64_t;
 
 /*TTTD-S 参数：迁移自 TTTD-S_Experiments/TTTD-S_Algorithm.cpp*/
 inline constexpr std::size_t CONST_VALUE_MAIN_D = 540;        // 切换前使用的主除数。
@@ -23,17 +24,9 @@ inline constexpr std::size_t MIN_T = 460;                     // 该大小之前
 inline constexpr std::size_t MY_LENGTH = 48;                  // 滑动窗口哈希的字节数。
 inline constexpr std::size_t SWITCH_P = 1600;                 // 块超过该大小后切换除数。
 
-// //数据结构
-// struct Chunk {
-//     std::size_t start;       // 起始位置，包含
-//     std::size_t end;         // 结束位置，不包含
-//     std::size_t length;      // chunk 长度，length = end - start
-//     ChunkHash hash;        // 内容哈希
-// };
-
 inline std::vector<std::vector<ull>> vPosition;
 inline std::vector<std::vector<ull>> vDiff;
-inline std::unordered_map<std::size_t, Chunk> umChunk;
+// inline std::unordered_map<std::size_t, Chunk> umChunk;
 
 ChunkHash getChunkHash(std::string_view data);
 
@@ -49,6 +42,6 @@ void pFinder(std::string& str);
 
 void strPushback(std::vector<std::string>& str);
 
-std::size_t lengthCalculator(Chunk chunk);
+// std::size_t lengthCalculator(Chunk chunk);
 
 #endif //BIMODAL_CONTENT_DEFINED_CHUNKING_FOR_BACKUP_STREAMS_DATA_H
