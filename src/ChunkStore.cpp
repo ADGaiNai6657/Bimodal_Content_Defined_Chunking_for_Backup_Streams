@@ -60,6 +60,6 @@ auto chunkStore(Chunk chunk) -> Chunk* {
  * 目前供去重统计/测试使用，后续 bimodal（论文 2.3/2.4）用它做“是否已存在”判断。
  * 注意：只看哈希、不校验内容，因此可能因碰撞产生假阳性；精确查询需再逐字节比较。
  */
-auto isExist(const ChunkHash hash) -> bool {
+auto isExist(const ChunkHash &hash) -> bool {
     return gChunkIndex.contains(hash);
 }

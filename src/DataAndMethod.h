@@ -63,7 +63,7 @@ auto getSubString(const Chunk &chunk) -> std::string_view;
 // ------------------------------- 分块与发射 --------------------------------
 
 // 计算每个文件相邻边界的差值（块长）。
-std::vector<std::vector<ull>> diffCalculator(std::vector<std::vector<ull>> v);
+std::vector<std::vector<ull>> diffCalculator(const std::vector<std::vector<ull>>& v);
 
 // 对一批数据流依次分块（每个元素对应一个文件/一条流）。
 void pFinder(std::vector<std::string>& str);
@@ -83,7 +83,7 @@ void emitChunk(const std::string& data, std::size_t begin, std::size_t end);
 auto chunkStore(Chunk chunk) -> Chunk*;
 
 // 存在性查询：供后续 bimodal（2.3/2.4）算法判断候选块是否已存。
-auto isExist(ChunkHash hash) -> bool;
+auto isExist(const ChunkHash &hash) -> bool;
 
 // 唯一块：独占一份内容，代表全局去重后真正需要存储的数据。
 struct Chunk {

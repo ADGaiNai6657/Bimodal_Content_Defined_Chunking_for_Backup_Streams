@@ -8,10 +8,10 @@
 #include "DataAndMethod.h"
 
 // 内部哈希原语（仅本编译单元使用，故只做前向声明）。
-auto getHashValue(std::string_view str) -> std::uint64_t;
+auto getHashValue(std::string_view content) -> std::uint64_t;
 
 /** 内容哈希入口：对一段字节计算完整 SHA-1 摘要。 */
-ChunkHash getChunkHash(const std::string_view str) {
+auto getChunkHash(const std::string_view str) -> ChunkHash {
     return sha1(str);
 }
 
@@ -33,7 +33,7 @@ auto getSubString(const Chunk &chunk) -> std::string_view {
 }
 
 /** Through the vector to calculate the diff between every beside num*/
-std::vector<std::vector<ull>> diffCalculator(std::vector<std::vector<ull>> v) {
+auto diffCalculator(const std::vector<std::vector<ull>>& v) -> std::vector<std::vector<ull>> {
     std::vector<std::vector<ull>> result;
     result.reserve(v.size());
     for (const auto& group : v) {
@@ -48,7 +48,7 @@ std::vector<std::vector<ull>> diffCalculator(std::vector<std::vector<ull>> v) {
 
 // 把 [begin, end) 切片交给 ChunkStore 去重，并记录一条出现记录。
 //每一次发射都将调用chunkStore()函数
-void emitChunk(const std::string& data, std::size_t begin, std::size_t end) {
+auto emitChunk(const std::string& data, std::size_t begin, std::size_t end) -> void {
     if (end <= begin) {
         return; // 跳过 0 长尾块。
     }
@@ -58,7 +58,7 @@ void emitChunk(const std::string& data, std::size_t begin, std::size_t end) {
 }
 
 /** Find TTTD-S chunk boundaries for every loaded file. */
-void pFinder(std::vector<std::string>& str) {
+auto pFinder(std::vector<std::string>& str) -> void {
     for (auto& s : str) {
         pFinder(s); // One boundary group per element.
     }
@@ -68,7 +68,7 @@ void pFinder(std::vector<std::string>& str) {
  * TTTD-S 核心：对单个数据流产生边界，结果存入 vPosition 的最后一组。
  * 逻辑迁移自 TTTD-S_Experiments/TTTD-S_Algorithm.cpp 的 pFinder。
  */
-void pFinder(const std::string& str) {
+auto pFinder(const std::string& str) -> void {
     vPosition.emplace_back();
     std::vector<ull>& boundaries = vPosition.back();
     vChunks.emplace_back();
@@ -128,7 +128,7 @@ void pFinder(const std::string& str) {
 }
 
 // 旧版冒烟测试：按行读 Dataset/temp.txt 到 str（正式流程请用 Baseline 的二进制整读）。
-void strPushback(std::vector<std::string>& str) {
+auto strPushback(std::vector<std::string>& str)  -> void{
     std::ifstream ifs("../Dataset/temp.txt");
     if (!ifs.is_open()) {
         std::cerr << "404\n";
