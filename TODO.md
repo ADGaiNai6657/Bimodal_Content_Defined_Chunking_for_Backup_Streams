@@ -1,6 +1,6 @@
 # TODO：Chunk 存储 / 去重 / 索引
 
-本清单只记录待办，不代表已完成。设计约定：唯一块**独占存储内容**、内容哈希用 `std::hash`、索引值为 `Chunk*`、输入**逐文件流式**、**新增类**承载存储逻辑。
+本清单只记录待办，不代表已完成。设计约定：唯一块**独占存储内容**、内容哈希用 **SHA-1（OpenSSL，完整 160 位）**、索引值为 `Chunk*`、输入**逐文件流式**、**新增类**承载存储逻辑。
 
 ## 0. 前置修复（当前编译阻塞）
 
@@ -12,7 +12,7 @@
 ## 1. 新增类 `src/ChunkStore.h` / `src/ChunkStore.cpp`
 
 - [ ] 定义 `using ChunkHash = std::uint64_t;`
-- [ ] 定义 `hashChunk(std::string_view) -> ChunkHash`（基于 `std::hash<std::string_view>`）
+- [ ] 定义 `hashChunk(std::string_view) -> ChunkHash`（基于 SHA-1，见 `src/Hash.h`）
 - [ ] 定义唯一块结构 `Chunk { ChunkHash hash; std::string data; std::size_t length; }`
 - [ ] 定义出现结构 `ChunkRef { Chunk* chunk; std::size_t offset; }`
 - [ ] 实现 `ChunkStore::store(std::string_view content) -> Chunk*`：算一次哈希 → 查索引 → 逐字节校验 → 命中返回既有指针并计 duplicate；否则新建并计 unique
@@ -50,7 +50,7 @@
 ## 5. 验证
 
 - [ ] `clang++ -std=c++20 -Wall -Wextra src/Baseline.cpp src/DataAndMethod.cpp src/ChunkStore.cpp` 零警告
-- [ ] 在 `Dataset/DataSet_1/emacs-21.4a.tar.gz` 上运行，确认 `totalChunks == 21158`（迁移前一致）
+- [ ] 在 `Dataset/DataSet_1`（5 个文件）上运行并记录 SHA-1 基线：`totalChunks == 186228`（旧的 `std::hash` 基线 21158 已失效）
 - [ ] 断言 `uniqueChunks + duplicateChunks == totalChunks`
 - [ ] 抽查跨文件重复块只占一份 `Chunk.data`
 - [ ] 抽查 `gChunkStore.exists(h)` 对已存块返回 `true`
@@ -58,7 +58,7 @@
 
 ## 6. 后续（本轮范围外）
 
-- [ ] 决定内容哈希是否升级为强哈希（SHA-256 等）或保留 `std::hash` + 逐字节校验
+- [x] 内容哈希已升级为强哈希：滑窗与内容哈希均使用 SHA-1（OpenSSL EVP，完整 160 位）
 - [ ] 接入 `FileController` 那套数据集菜单/报告/SUMMARY 脚手架
 - [ ] 为论文 2.3（breaking-apart）与 2.4（amalgamation）预留 existence query 接口
 - [ ] 与 BSW/TTTD/TTTD-S 的分块结果做 DER 与平均块长对比

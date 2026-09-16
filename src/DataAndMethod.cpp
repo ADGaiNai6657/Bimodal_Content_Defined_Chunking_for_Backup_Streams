@@ -10,14 +10,14 @@
 // 内部哈希原语（仅本编译单元使用，故只做前向声明）。
 auto getHashValue(std::string_view str) -> std::uint64_t;
 
-/** 内容哈希入口：把窗口哈希结果统一成 ChunkHash 类型。 */
+/** 内容哈希入口：对一段字节计算完整 SHA-1 摘要。 */
 ChunkHash getChunkHash(const std::string_view str) {
-    return static_cast<ChunkHash>(getHashValue(str));
+    return sha1(str);
 }
 
-/** Calculate the hash value of one data window. */
+/** Calculate the hash value of one data window (SHA-1 截断为 64 位). */
 auto getHashValue(const std::string_view content)-> std::uint64_t {
-    return std::hash<std::string_view>{}(content);
+    return sha1WindowHash(content);
 }
 
 /** Return the window ending at the given position. */
@@ -52,7 +52,7 @@ void emitChunk(const std::string& data, std::size_t begin, std::size_t end) {
     if (end <= begin) {
         return; // 跳过 0 长尾块。
     }
-    Chunk chunk{0, data.substr(begin, end - begin), end - begin};
+    Chunk chunk{ChunkHash{}, data.substr(begin, end - begin), end - begin};
     Chunk* stored = chunkStore(std::move(chunk));
     vChunks.back().push_back(ChunkRef{stored, begin});
 }

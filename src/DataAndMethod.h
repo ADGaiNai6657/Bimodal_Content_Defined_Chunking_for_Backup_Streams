@@ -21,9 +21,12 @@
 #include <deque>
 #include <vector>
 
+#include "Hash.h"
+
 struct Chunk;
 
-using ChunkHash = std::uint64_t;
+// 内容哈希：完整 160 位 SHA-1 摘要。
+using ChunkHash = Sha1Digest;
 
 using ull = unsigned long long;
 
@@ -48,7 +51,7 @@ inline std::vector<std::vector<ull>> vDiff;
 
 // ------------------------------- 哈希与切片 --------------------------------
 
-// 内容哈希入口：对一段字节计算 ChunkHash（内部复用 getHashValue）。
+// 内容哈希入口：对一段字节计算完整 SHA-1 摘要作为 ChunkHash。
 ChunkHash getChunkHash(std::string_view str);
 
 // 取“结束于 end”的定长窗口 [end-length, end)；流首不足 length 时取 [0, end)。
@@ -98,7 +101,7 @@ struct ChunkRef {
 // 唯一块池：deque 保证 push_back 后既有的 Chunk* 不失效。
 inline std::deque<Chunk> gChunkPool;
 // 内容索引：一个哈希可对应多个 Chunk*（碰撞候选），命中后再逐字节确认。
-inline std::unordered_multimap<ChunkHash, Chunk*> gChunkIndex;
+inline std::unordered_multimap<ChunkHash, Chunk*, Sha1DigestHash> gChunkIndex;
 inline std::size_t gTotalChunks = 0;  // 发射的块总数（含重复）。
 inline std::size_t gDupChunks = 0;    // 命中去重的块数。
 inline std::size_t gTotalBytes = 0;   // 发射的总字节数（等于输入字节数）。
