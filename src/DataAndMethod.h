@@ -83,6 +83,10 @@ auto chunkStore(Chunk chunk) -> Chunk*;
 // 存在性查询：供后续 bimodal（2.3/2.4）算法判断候选块是否已存。
 auto isExist(const ChunkHash &hash) -> bool;
 
+// 精确存在性查询：命中返回唯一块指针，否则 nullptr；只读，不改索引与统计。
+// 2.3 拆分式用它判断大块是否重复（逐字节校验，避免哈希碰撞误判）。
+auto lookup(std::string_view content) -> Chunk*;
+
 // 唯一块：独占一份内容，代表全局去重后真正需要存储的数据。
 struct Chunk {
     ChunkHash hash;        // 内容哈希。

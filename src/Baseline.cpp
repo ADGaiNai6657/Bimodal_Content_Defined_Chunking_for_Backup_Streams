@@ -11,17 +11,78 @@
 #include<iomanip>
 #include<algorithm>
 
+#include "BreakingApart.h"
 #include "DataAndMethod.h"
 
 /*TTTD 算法核心迁移自 TTTD_Experiments*/
 
 using ull = unsigned long long;
 
+// 处理模式：baseline（TTTD 直接分块）或拆分式（论文 2.3）。
+enum class Mode { Baseline, BreakingApart };
+
+// 拆分式小块器相对大块器的缩小倍数（论文取 4–8）。
+constexpr std::size_t kBaSmallDivisor = 4;
+
+// 以基准 TTTD 参数为 1 倍，按 scale 放大得到大块器；小块器 = 大块器 / kBaSmallDivisor。
+BreakingApartConfig makeBreakingConfig(const std::size_t scale) {
+    const ChunkerParams big{
+            CONST_VALUE_MAIN_D * scale,
+            CONST_VALUE_SECOND_D * scale,
+            MIN_T * scale,
+            MAX_T * scale,
+            MY_LENGTH};
+    return {big, deriveSmallParams(big, kBaSmallDivisor)};
+}
+
+// 当前生效的拆分式参数（由主菜单选择大块尺寸后设置）。
+BreakingApartConfig gBreakingConfig = makeBreakingConfig(1);
+
+// 累计统计快照，用于计算「单个文件 / 单个备份」的增量。
+struct RunStats {
+    std::size_t totalChunks;
+    std::size_t uniqueChunks;
+    std::size_t dupChunks;
+    std::size_t totalBytes;
+    std::size_t uniqueBytes;
+    std::size_t baBig;
+    std::size_t baDupBig;
+    std::size_t baRechunk;
+    std::size_t baSmall;
+};
+
+RunStats snapshotStats() {
+    return {gTotalChunks, gChunkPool.size(), gDupChunks, gTotalBytes, gUniqueBytes,
+            gBaBigChunks, gBaDupBigChunks, gBaRechunkRegions, gBaSmallChunks};
+}
+
+// 打印单个文件的增量与累计 DER，便于按备份版本定位 2.3 的效果。
+void reportFileDelta(const std::filesystem::path& path, const Mode mode,
+                     const RunStats& before, const RunStats& after) {
+    const double cumDer = after.uniqueBytes
+                              ? static_cast<double>(after.totalBytes) / static_cast<double>(after.uniqueBytes)
+                              : 0.0;
+    std::cout << "  " << path.filename().string()
+              << " size=" << (after.totalBytes - before.totalBytes)
+              << " chunks+=" << (after.totalChunks - before.totalChunks)
+              << " unique+=" << (after.uniqueChunks - before.uniqueChunks)
+              << " dup+=" << (after.dupChunks - before.dupChunks)
+              << " uniqueBytes+=" << (after.uniqueBytes - before.uniqueBytes)
+              << " cumDER=" << std::fixed << std::setprecision(4) << cumDer;
+    if (mode == Mode::BreakingApart) {
+        std::cout << " big+=" << (after.baBig - before.baBig)
+                  << " dupBig+=" << (after.baDupBig - before.baDupBig)
+                  << " rechunk+=" << (after.baRechunk - before.baRechunk)
+                  << " small+=" << (after.baSmall - before.baSmall);
+    }
+    std::cout << '\n';
+}
+
 // 旧版按行读入的缓存，仅 strPushback 使用；正式流程不再走这里。
 // std::vector<std::string> str;
 
-// 读取单个文件并按 TTTD 分块，返回后源缓冲即释放。
-void processFile(const std::filesystem::path& path) {
+// 读取单个文件并分块，返回后源缓冲即释放。
+void processFile(const std::filesystem::path& path, const Mode mode) {
     std::ifstream ifs(path, std::ios::binary);
     if (!ifs) {
         std::cerr << "open failed: " << path.string() << '\n';
@@ -30,15 +91,20 @@ void processFile(const std::filesystem::path& path) {
     // 每个文件只保留这一份原始字节，分块后立即释放。
     std::string buffer((std::istreambuf_iterator<char>(ifs)),
                        std::istreambuf_iterator<char>());
-    pFinder(buffer);
+    if (mode == Mode::Baseline) {
+        pFinder(buffer);
+    } else {
+        processFileBreakingApart(buffer, gBreakingConfig);
+    }
 }
 
 // 遍历目录下所有普通文件逐个分块。
 // recursive=false：只处理顶层文件（DataSet_1）。
 // recursive=true ：连子目录一起遍历（DataSet_2 的解压源码树）。
-void processDirectory(const std::filesystem::path& dir, bool recursive) {
+void processDirectory(const std::filesystem::path& dir, const bool recursive, const Mode mode) {
     namespace fs = std::filesystem;
 
+    std::vector<fs::path> files;
     std::error_code ec;
     if (recursive) {
         for (fs::recursive_directory_iterator it(dir, ec), end; it != end; it.increment(ec)) {
@@ -47,7 +113,7 @@ void processDirectory(const std::filesystem::path& dir, bool recursive) {
                 break;
             }
             if (it->is_regular_file()) {
-                processFile(it->path());
+                files.push_back(it->path());
             }
         }
     } else {
@@ -57,21 +123,38 @@ void processDirectory(const std::filesystem::path& dir, bool recursive) {
                 break;
             }
             if (it->is_regular_file()) {
-                processFile(it->path());
+                files.push_back(it->path());
             }
         }
+    }
+
+    // 稳定顺序：保证备份按版本先后处理（backup stream 语义）。
+    std::sort(files.begin(), files.end());
+
+    // 文件较少时（如 DataSet_1/3）逐文件报告，便于定位每个备份的效果。
+    const bool perFile = files.size() <= 32;
+    for (const auto& path : files) {
+        if (!perFile) {
+            processFile(path, mode);
+            continue;
+        }
+        const RunStats before = snapshotStats();
+        processFile(path, mode);
+        reportFileDelta(path, mode, before, snapshotStats());
     }
 }
 
 // 目标既可以是单个文件，也可以是一个目录；目录按 recursive 决定是否递归。
-void resolver(const std::filesystem::path& target, const bool recursive) {
+void resolver(const std::filesystem::path& target, const bool recursive, const Mode mode) {
     namespace fs = std::filesystem;
 
     std::error_code ec;
     if (fs::is_regular_file(target, ec)) {
-        processFile(target);
+        const RunStats before = snapshotStats();
+        processFile(target, mode);
+        reportFileDelta(target, mode, before, snapshotStats());
     } else if (fs::is_directory(target, ec)) {
-        processDirectory(target, recursive);
+        processDirectory(target, recursive, mode);
     } else {
         std::cerr << "not a file or directory: " << target.string() << '\n';
         return;
@@ -93,21 +176,29 @@ std::filesystem::path datasetRoot() {
     return "../Dataset"; // 都不存在时返回默认值，交由后续 exists 检查报错。
 }
 
-// 入口：交互式选择数据集。
-//   DataSet_1：tar.gz 压缩包，逐文件（不递归）。
-//   DataSet_2：解压后的源码树，递归全部文件。
-// 测试时可用管道喂入选择，例如：echo 1 | baseline.exe
+// 入口：交互式选择数据集与算法。
+//   1/3/5：baseline（TTTD 直接分块），数据集依次为 DataSet_1 / DataSet_3 / DataSet_4。
+//   2：baseline 跑 DataSet_2（源码树，递归）。
+//   4：拆分式（论文 2.3）跑 DataSet_3（未压缩 tar 备份流）。
+//   6：拆分式（论文 2.3）跑 DataSet_4（合成集中变更备份流）。
+// 测试时可用管道喂入选择，例如：echo 6 | baseline.exe
 int main() {
     namespace fs = std::filesystem;
 
     const fs::path root = datasetRoot();
     const fs::path kDataSet1 = root / "DataSet_1";
     const fs::path kDataSet2 = root / "DataSet_2";
+    const fs::path kDataSet3 = root / "DataSet_3";
+    const fs::path kDataSet4 = root / "DataSet_4";
 
-    std::cout << "请选择数据集：\n"
-              << "  1) DataSet_1 —— tar.gz 压缩包（逐文件，不递归）\n"
-              << "  2) DataSet_2 —— 解压源码树（递归全部文件）\n"
-              << "请输入 1 或 2: ";
+    std::cout << "请选择运行项：\n"
+              << "  1) DataSet_1 —— tar.gz 压缩包（baseline TTTD）\n"
+              << "  2) DataSet_2 —— 解压源码树（baseline TTTD，递归）\n"
+              << "  3) DataSet_3 —— 未压缩 tar（baseline TTTD）\n"
+              << "  4) DataSet_3 —— 拆分式（论文 2.3）\n"
+              << "  5) DataSet_4 —— 合成备份流（baseline TTTD）\n"
+              << "  6) DataSet_4 —— 拆分式（论文 2.3）\n"
+              << "请输入 1/2/3/4/5/6: ";
 
     int choice = 0;
     if (!(std::cin >> choice)) {
@@ -117,6 +208,7 @@ int main() {
 
     fs::path target;
     bool recursive = false;
+    Mode mode = Mode::Baseline;
     switch (choice) {
         case 1:
             target = kDataSet1;
@@ -125,6 +217,24 @@ int main() {
         case 2:
             target = kDataSet2;
             recursive = true;
+            break;
+        case 3:
+            target = kDataSet3;
+            recursive = false;
+            break;
+        case 4:
+            target = kDataSet3;
+            recursive = false;
+            mode = Mode::BreakingApart;
+            break;
+        case 5:
+            target = kDataSet4;
+            recursive = false;
+            break;
+        case 6:
+            target = kDataSet4;
+            recursive = false;
+            mode = Mode::BreakingApart;
             break;
         default:
             std::cerr << "无效选择：" << choice << '\n';
@@ -137,10 +247,40 @@ int main() {
         return 1;
     }
 
-    std::cout << "使用数据集 " << choice << "：" << target.string()
-              << (recursive ? "（递归）" : "（不递归）") << '\n';
+    if (mode == Mode::BreakingApart) {
+        std::cout << "选择大块平均尺寸：\n"
+                  << "  1) 约 1k（baseline 同参）\n"
+                  << "  2) 约 4k\n"
+                  << "  3) 约 16k\n"
+                  << "  4) 约 32k\n"
+                  << "请输入 1-4: ";
+        int scaleChoice = 1;
+        if (!(std::cin >> scaleChoice)) {
+            scaleChoice = 1;
+        }
+        std::size_t scale = 1;
+        switch (scaleChoice) {
+            case 2: scale = 4; break;
+            case 3: scale = 16; break;
+            case 4: scale = 32; break;
+            default: scale = 1; break;
+        }
+        gBreakingConfig = makeBreakingConfig(scale);
+        resetBreakingApartStats();
+        std::cout << "大块参数 mainD=" << gBreakingConfig.big.mainD
+                  << " secondD=" << gBreakingConfig.big.secondD
+                  << " minT=" << gBreakingConfig.big.minT
+                  << " maxT=" << gBreakingConfig.big.maxT
+                  << " window=" << gBreakingConfig.big.window
+                  << "（小块 /" << kBaSmallDivisor << "）\n";
+    }
 
-    resolver(target, recursive);
+    std::cout << "运行项 " << choice << "：" << target.string()
+              << (recursive ? "（递归）" : "（不递归）")
+              << (mode == Mode::BreakingApart ? "  算法=拆分式2.3" : "  算法=baseline TTTD")
+              << '\n';
+
+    resolver(target, recursive, mode);
 
     constexpr bool kPrintBoundaries = false; // 边界数量很大，默认关闭，仅调试时打开。
     if (kPrintBoundaries) {
@@ -164,4 +304,13 @@ int main() {
               << (gUniqueBytes ? static_cast<double>(gTotalBytes) / static_cast<double>(gUniqueBytes)
                                : 0.0)
               << '\n';
+
+    if (mode == Mode::BreakingApart) {
+        std::cout << "bigChunks=" << gBaBigChunks
+                  << " dupBigChunks=" << gBaDupBigChunks
+                  << " queries=" << gBaQueryCount
+                  << " rechunkRegions=" << gBaRechunkRegions
+                  << " smallChunks=" << gBaSmallChunks
+                  << '\n';
+    }
 }
