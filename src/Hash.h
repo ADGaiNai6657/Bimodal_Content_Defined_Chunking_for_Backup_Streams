@@ -4,7 +4,7 @@
 // Hash.h
 // 基于 OpenSSL EVP 的 SHA-1 封装。承担两件事：
 //   1) 完整 160 位内容摘要，作为去重索引 ChunkHash；
-//   2) 截断 64 位窗口哈希，供 TTTD-S 取模判断边界。
+//   2) 截断 64 位窗口哈希，供 TTTD 取模判断边界。
 // 统一放这里，避免 DataAndMethod / ChunkStore 直接依赖 OpenSSL。
 
 #ifndef BIMODAL_CONTENT_DEFINED_CHUNKING_FOR_BACKUP_STREAMS_HASH_H

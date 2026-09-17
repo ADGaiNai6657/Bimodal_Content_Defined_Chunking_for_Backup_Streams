@@ -57,7 +57,7 @@ auto emitChunk(const std::string& data, std::size_t begin, std::size_t end) -> v
     vChunks.back().push_back(ChunkRef{stored, begin});
 }
 
-/** Find TTTD-S chunk boundaries for every loaded file. */
+/** Find TTTD chunk boundaries for every loaded file. */
 auto pFinder(std::vector<std::string>& str) -> void {
     for (auto& s : str) {
         pFinder(s); // One boundary group per element.
@@ -65,18 +65,17 @@ auto pFinder(std::vector<std::string>& str) -> void {
 }
 
 /**
- * TTTD-S 核心：对单个数据流产生边界，结果存入 vPosition 的最后一组。
- * 逻辑迁移自 TTTD-S_Experiments/TTTD-S_Algorithm.cpp 的 pFinder。
+ * TTTD 核心：对单个数据流产生边界，结果存入 vPosition 的最后一组。
+ * 逻辑迁移自 TTTD_Experiments/TTTD_Algorithm.cpp 的 pFinder。
+ * 主/备份除数固定不变（不做块大时的除数切换）。
  */
 auto pFinder(const std::string& str) -> void {
     vPosition.emplace_back();
     std::vector<ull>& boundaries = vPosition.back();
     vChunks.emplace_back();
 
-    std::size_t main_D = CONST_VALUE_MAIN_D;     // 当前生效的主除数。
-    std::size_t second_D = CONST_VALUE_SECOND_D; // 当前生效的备份除数。
-    std::size_t last_P = 0;                      // 上一个已保存边界的位置。
-    std::size_t backupBreak = 0;                 // 最新的备份边界候选。
+    std::size_t last_P = 0;      // 上一个已保存边界的位置。
+    std::size_t backupBreak = 0; // 最新的备份边界候选。
 
     for (std::size_t p = 0; p <= str.length(); p++) {
         const std::string_view subString = getSubString(str, p, MY_LENGTH);
@@ -86,22 +85,15 @@ auto pFinder(const std::string& str) -> void {
             continue; // 保持最小块长。
         }
 
-        if (p - last_P > SWITCH_P) {
-            main_D = CONST_VALUE_SECOND_D;          // 块偏大时更容易命中主规则。
-            second_D = HALF_CONST_VALUE_SECOND_D;   // 备份规则也变密。
-        }
-
-        if (hash % second_D == second_D - 1) {
+        if (hash % CONST_VALUE_SECOND_D == CONST_VALUE_SECOND_D - 1) {
             backupBreak = p; // 记住最新的备份边界。
         }
 
-        if (hash % main_D == main_D - 1) {
+        if (hash % CONST_VALUE_MAIN_D == CONST_VALUE_MAIN_D - 1) {
             emitChunk(str, last_P, p); // 发射 [last_P, p) 为一整块。
-            boundaries.push_back(p); // 优先使用主规则边界。
+            boundaries.push_back(p);   // 优先使用主规则边界。
             backupBreak = 0;
             last_P = p;
-            main_D = CONST_VALUE_MAIN_D;
-            second_D = CONST_VALUE_SECOND_D;
             continue;
         }
 
@@ -111,17 +103,15 @@ auto pFinder(const std::string& str) -> void {
 
         if (backupBreak != 0) {
             emitChunk(str, last_P, backupBreak); // 发射 [last_P, backupBreak) 为一块。
-            last_P = backupBreak;              // 使用已保存的备份边界。
+            last_P = backupBreak;                // 使用已保存的备份边界。
             boundaries.push_back(backupBreak);
             backupBreak = 0;
         } else {
-            emitChunk(str, last_P, p);           // 发射 [last_P, p) 为一块。
-            boundaries.push_back(p);           // 否则在最大块长处强制切分。
+            emitChunk(str, last_P, p); // 发射 [last_P, p) 为一块。
+            boundaries.push_back(p);   // 否则在最大块长处强制切分。
             last_P = p;
             backupBreak = 0;
         }
-        main_D = CONST_VALUE_MAIN_D;
-        second_D = CONST_VALUE_SECOND_D;
     }
 
     emitChunk(str, last_P, str.size()); // 补上尾部剩余数据。
