@@ -23,12 +23,33 @@
 
 ---
 
-## 1. 阅读顺序（按数据流）
+## 1. 阅读顺序
 
-1. `src/BreakingApart.h` —— 先认类型：`ChunkerParams`、`BreakingApartConfig`。
-2. `src/BreakingApart.cpp:46 findBoundaries` —— 最基础的“怎么切”。
-3. `src/BreakingApart.cpp:97 processFileBreakingApart` —— 2.3 的主循环（最核心）。
-4. `src/BreakingApart.cpp:17 emitSmalls` —— 被主循环调用的“小块细切”。
+### 1.1 文件顺序（先定义、后实现、再调用）
+
+| # | 文件 | 为什么要按这个次序读 |
+| --- | --- | --- |
+| 1 | `docs/Breaking-Apart-Design.md` | 先建立算法背景与设计取舍。 |
+| 2 | `docs/Breaking-Apart-Code-Guide.md` | 本导读，给出全局地图。 |
+| 3 | `src/Hash.h` | 最底层类型 `Sha1Digest` 与哈希接口。 |
+| 4 | `src/DataAndMethod.h` | 全局类型、参数常量、存储声明、计数器。 |
+| 5 | `src/Hash.cpp` | 哈希如何实现（内容摘要 / 窗口哈希 / 桶哈希）。 |
+| 6 | `src/DataAndMethod.cpp` | 切片 `getSubString`、发射 `emitChunk`、baseline `pFinder`。 |
+| 7 | `src/ChunkStore.cpp` | 去重与查询：`chunkStore` / `isExist` / `lookup`。 |
+| 8 | `src/BreakingApart.h` | 2.3 的参数与接口。 |
+| 9 | `src/BreakingApart.cpp` | 2.3 核心：`findBoundariesInRange` → `processFileBreakingApart`。 |
+| 10 | `src/Baseline.cpp` | 驱动层：菜单、读文件、逐文件统计。 |
+| 11 | `tools/make_synthetic_backups.py` | 合成备份流数据集。 |
+| 12 | `CMakeLists.txt` | 构建目标与依赖。 |
+
+> 一句话原则：**类型声明（`*.h`）先于实现（`*.cpp`），底层原语先于上层算法，算法先于驱动与脚本。**
+
+### 1.2 函数顺序（按数据流）
+
+1. `src/BreakingApart.h` —— 先认类型：`ChunkerParams`(`:33`)、`BreakingApartConfig`(`:42`)。
+2. `src/BreakingApart.cpp:68 findBoundariesInRange` / `:122 findBoundaries` —— 最基础的“怎么切”。
+3. `src/BreakingApart.cpp:136 processFileBreakingApart` —— 2.3 的主循环（最核心）。
+4. `src/BreakingApart.cpp:38 emitSmalls` —— 被主循环调用的“小块细切”。
 5. `src/ChunkStore.cpp:30 chunkStore` / `:71 lookup` —— 块存哪、怎么查。
 6. `src/DataAndMethod.cpp:51 emitChunk` —— 主循环与存储之间的桥。
 7. `src/Baseline.cpp:85 processFile` / `:104 processDirectory` / `:148 resolver` —— 驱动层。
@@ -38,7 +59,7 @@
 
 ## 2. 先认类型（`BreakingApart.h`）
 
-### `ChunkerParams`（`BreakingApart.h:22`）
+### `ChunkerParams`（`BreakingApart.h:33`）
 一套 TTTD 分块参数。以前这些是写死的常量，现在抽出来，好让“大块器”和“小块器”共用同一套切分代码：
 
 | 字段 | 含义 | 影响 |
@@ -51,10 +72,10 @@
 
 > 直觉：`mainD` 控制“平均块长”。`minT + mainD` 约等于平均块长（比如 460+540≈1000）。
 
-### `BreakingApartConfig`（`BreakingApart.h:31`）
+### `BreakingApartConfig`（`BreakingApart.h:42`）
 就是 `{ big, small }` 两个 `ChunkerParams`。2.3 需要两套参数：大块器负责主体，小块器负责“变更边缘”。
 
-### 统计量（`BreakingApart.h:46-50`）
+### 统计量（`BreakingApart.h:71-75`）
 全局计数器，用来解释算法行为：
 - `gBaBigChunks`：共看了多少个大块。
 - `gBaDupBigChunks`：其中多少个是重复的。
@@ -67,8 +88,8 @@
 ## 3. `findBoundaries` / `findBoundariesInRange`：纯分块，不存不发射
 
 **职责**：给一段字节，返回切点位置（升序），**不碰全局存储**。
-- `findBoundariesInRange(data, b0, b1, params)`（`BreakingApart.cpp:46`）：只扫 `[b0, b1]`，但窗口取自整段 `data`（可越过 `b0` 左端），`min/max` 从 `b0` 起算。
-- `findBoundaries(data, params)`（`BreakingApart.cpp:89`）：等价于 `findBoundariesInRange(data, 0, data.size(), params)`。
+- `findBoundariesInRange(data, b0, b1, params)`（`BreakingApart.cpp:68`）：只扫 `[b0, b1]`，但窗口取自整段 `data`（可越过 `b0` 左端），`min/max` 从 `b0` 起算。
+- `findBoundaries(data, params)`（`BreakingApart.cpp:122`）：等价于 `findBoundariesInRange(data, 0, data.size(), params)`。
 
 后者用于“大块/整文件”，前者用于“按需细切某个 change region”。
 
@@ -95,7 +116,7 @@ else                  { last_P = pos;         boundaries.push_back(pos); }
 
 ---
 
-## 4. 主循环 `processFileBreakingApart`（`BreakingApart.cpp:97`）
+## 4. 主循环 `processFileBreakingApart`（`BreakingApart.cpp:136`）
 
 这是 2.3 的心脏。按行拆：
 
@@ -141,7 +162,7 @@ else if (prevDup || next) {       // ② 自己不重复，但挨着一个重复
 - 情形 ② 就是论文说的 transition / change region：块本身是新的，但它夹在重复数据和新数据之间，细切能让“新旧边界”更精确，下一次备份更容易命中重复。
 - 情形 ③ 后面把 `prevDup` 置 `false`（论文 Fig.1 第 6 行印成 `true`，与正文矛盾，这里按语义修正）。
 
-### 4.4 小块细切 `emitSmalls`（`BreakingApart.cpp:17`）
+### 4.4 小块细切 `emitSmalls`（`BreakingApart.cpp:38`）
 
 把 `[b0, b1)` 这一段按 `small` 里落在其中的切点切开，逐段发射：
 
