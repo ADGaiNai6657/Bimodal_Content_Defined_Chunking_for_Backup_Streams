@@ -13,14 +13,14 @@
 
 #include "DataAndMethod.h"
 
-/*TTTD-S 算法核心迁移自 TTTD-S_Experiments*/
+/*TTTD 算法核心迁移自 TTTD_Experiments*/
 
 using ull = unsigned long long;
 
 // 旧版按行读入的缓存，仅 strPushback 使用；正式流程不再走这里。
 // std::vector<std::string> str;
 
-// 读取单个文件并按 TTTD-S 分块，返回后源缓冲即释放。
+// 读取单个文件并按 TTTD 分块，返回后源缓冲即释放。
 void processFile(const std::filesystem::path& path) {
     std::ifstream ifs(path, std::ios::binary);
     if (!ifs) {

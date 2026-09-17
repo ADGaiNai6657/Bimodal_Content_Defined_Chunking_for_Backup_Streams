@@ -3,7 +3,7 @@
 //
 // DataAndMethod.h
 // 本文件承担两件事：
-//   1) TTTD-S 分块算法的参数、数据结构与函数声明；
+//   1) TTTD 分块算法的参数、数据结构与函数声明；
 //   2) 去重存储（ChunkStore）的全局状态、内容索引与统计量。
 // 数据流：Baseline 逐文件整读 -> pFinder 产生边界 -> emitChunk 切片发射
 //         -> chunkStore 去重 -> 写入 gChunkPool/gChunkIndex。
@@ -31,25 +31,23 @@ using ChunkHash = Sha1Digest;
 using ull = unsigned long long;
 
 // ---------------------------------------------------------------------------
-// TTTD-S 算法参数（迁移自 TTTD-S_Experiments/TTTD-S_Algorithm.cpp）
-// TTTD-S = Twin Threshold Two Divisors 的“切换版”：
-//   主除数决定常规切点，备份除数在主规则长时间不命中时兜底；
-//   块长超过 SWITCH_P 后改用更密的除数，避免块过大。
+// TTTD 算法参数（迁移自 TTTD_Experiments/TTTD_Algorithm.cpp）
+// TTTD = Twin Threshold Two Divisors：
+//   主除数决定常规切点；备份除数在主规则长时间不命中时兜底；
+//   块达到 MAX_T 仍无主规则切点时，用最近的备份切点或强制切分。
 // ---------------------------------------------------------------------------
-inline constexpr std::size_t CONST_VALUE_MAIN_D = 540;        // 切换前使用的主除数。
-inline constexpr std::size_t CONST_VALUE_SECOND_D = 270;      // 正常情况下使用的备份除数。
-inline constexpr std::size_t HALF_CONST_VALUE_SECOND_D = CONST_VALUE_SECOND_D / 2; // 切换后更密的备份除数。
+inline constexpr std::size_t CONST_VALUE_MAIN_D = 540;        // 主除数，决定常规切点。
+inline constexpr std::size_t CONST_VALUE_SECOND_D = 270;      // 备份除数，兜底切点。
 inline constexpr std::size_t MAX_T = 2800;                    // 块达到该大小强制切分。
 inline constexpr std::size_t MIN_T = 460;                     // 该大小之前不产生边界。
 inline constexpr std::size_t MY_LENGTH = 48;                  // 滑动窗口哈希的字节数。
-inline constexpr std::size_t SWITCH_P = 1600;                 // 块超过该大小后切换除数。
 
 // 每个文件一组的切点位置（文件内偏移），仅用于报告与调试。
 inline std::vector<std::vector<ull>> vPosition;
 // 与 vPosition 对应，存放相邻切点之差（即块长），便于统计块长分布。
 inline std::vector<std::vector<ull>> vDiff;
 
-// ------------------------------- 哈希与切片 --------------------------------
+// ------------- ------------------ 哈希与切片 --------------------------------
 
 // 内容哈希入口：对一段字节计算完整 SHA-1 摘要作为 ChunkHash。
 ChunkHash getChunkHash(std::string_view str);
@@ -68,7 +66,7 @@ std::vector<std::vector<ull>> diffCalculator(const std::vector<std::vector<ull>>
 // 对一批数据流依次分块（每个元素对应一个文件/一条流）。
 void pFinder(std::vector<std::string>& str);
 
-// TTTD-S 核心：对单个数据流产生边界，并把边界间的数据发射给 ChunkStore。
+// TTTD 核心：对单个数据流产生边界，并把边界间的数据发射给 ChunkStore。
 void pFinder(const std::string& str);
 
 // 旧版冒烟测试路径：按行读 Dataset/temp.txt。
