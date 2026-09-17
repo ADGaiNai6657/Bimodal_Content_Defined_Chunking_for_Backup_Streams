@@ -34,13 +34,13 @@ struct BreakingApartConfig {
 };
 
 // 纯函数分块器：返回切点位置（升序，不含文件末尾），不发射、不改全局状态。
-std::vector<std::size_t> findBoundaries(std::string_view data, const ChunkerParams& params);
+auto findBoundaries(std::string_view data, const ChunkerParams& params) -> std::vector<std::size_t>;
 
 // 由大块参数派生小块参数：各尺寸除以 k（窗口保持不变）。
-ChunkerParams deriveSmallParams(const ChunkerParams& big, std::size_t k);
+auto deriveSmallParams(const ChunkerParams& big, std::size_t k) -> ChunkerParams;
 
 // 对一条数据流执行拆分式分块，并把块发射给 ChunkStore（去重）。
-void processFileBreakingApart(const std::string& data, const BreakingApartConfig& config);
+auto processFileBreakingApart(const std::string& data, const BreakingApartConfig& config) -> void;
 
 // 拆分式的统计量（供汇总输出）。
 inline std::size_t gBaBigChunks = 0;      // 大块总数。
@@ -49,6 +49,6 @@ inline std::size_t gBaQueryCount = 0;     // 存在性查询次数。
 inline std::size_t gBaRechunkRegions = 0; // 被小块重切的 transition 区域数。
 inline std::size_t gBaSmallChunks = 0;    // 重切产生的小块数。
 
-void resetBreakingApartStats();
+auto resetBreakingApartStats() -> void;
 
 #endif //BIMODAL_CONTENT_DEFINED_CHUNKING_FOR_BACKUP_STREAMS_BREAKINGAPART_H

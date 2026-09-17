@@ -12,41 +12,45 @@
 
 namespace {
 
-// 把 [b0, b1) 按已预计算的小块切点切成若干段并发射。
-// small 为整文件的小块切点（升序）；两端不足一小块的残余也各自成块。
-void emitSmalls(const std::string& data, const std::size_t b0, const std::size_t b1,
-                const std::vector<std::size_t>& small) {
-    const auto emit = [&](const std::size_t a, const std::size_t b) {
-        if (b > a) {
-            emitChunk(data, a, b);
-            ++gBaSmallChunks;
-        }
-    };
+    // 把 [b0, b1) 按已预计算的小块切点切成若干段并发射。
+    // small 为整文件的小块切点（升序）；两端不足一小块的残余也各自成块。
+    auto emitSmalls(const std::string& data,    //整个输入文件数据
+                    const std::size_t b0,       //当前大块起始位置
+                    const std::size_t b1,       //当前小块起始位置
+                    const std::vector<std::size_t>& small)  //整个文件的小块切点列表（升序）
+                    -> void {
 
-    std::size_t prev = b0;
-    for (const std::size_t s : small) {
-        if (s <= b0) {
-            continue; // 落在区域左侧之外。
+        const auto emit = [&](const std::size_t a, const std::size_t b) -> void {
+            if (b > a) {
+                emitChunk(data, a, b);
+                ++gBaSmallChunks;
+            }
+        };
+
+        std::size_t prev = b0;
+        for (const std::size_t s : small) {
+            if (s <= b0) {
+                continue; // 落在区域左侧之外。
+            }
+            if (s >= b1) {
+                break; // 已越过区域右端。
+            }
+            emit(prev, s);
+            prev = s;
         }
-        if (s >= b1) {
-            break; // 已越过区域右端。
-        }
-        emit(prev, s);
-        prev = s;
+        emit(prev, b1); // 区域右端残余。
     }
-    emit(prev, b1); // 区域右端残余。
-}
 
 } // namespace
 
-std::vector<std::size_t> findBoundaries(const std::string_view data, const ChunkerParams& params) {
+auto findBoundaries(const std::string_view data, const ChunkerParams& params) -> std::vector<std::size_t> {
     std::vector<std::size_t> boundaries;
     std::size_t last_P = 0;      // 上一个已保存边界。
     std::size_t backupBreak = 0; // 最新的备份边界候选。
 
     for (std::size_t pos = 0; pos <= data.size(); pos++) {
         const std::string_view window = getSubString(data, pos, params.window);
-        const std::size_t hash = static_cast<std::size_t>(sha1WindowHash(window));
+        const std::uint64_t hash = static_cast<std::uint64_t>(sha1WindowHash(window));
 
         if (pos - last_P < params.minT) {
             continue; // 保持最小块长。
@@ -80,7 +84,7 @@ std::vector<std::size_t> findBoundaries(const std::string_view data, const Chunk
     return boundaries;
 }
 
-ChunkerParams deriveSmallParams(const ChunkerParams& big, const std::size_t k) {
+auto deriveSmallParams(const ChunkerParams& big, const std::size_t k) -> ChunkerParams {
     const std::size_t divisor = (k == 0) ? 1 : k;
     return ChunkerParams{
             big.mainD / divisor,
@@ -90,7 +94,7 @@ ChunkerParams deriveSmallParams(const ChunkerParams& big, const std::size_t k) {
             big.window};
 }
 
-void processFileBreakingApart(const std::string& data, const BreakingApartConfig& config) {
+auto processFileBreakingApart(const std::string& data, const BreakingApartConfig& config) -> void {
     vPosition.emplace_back();
     vChunks.emplace_back();
 
@@ -143,7 +147,7 @@ void processFileBreakingApart(const std::string& data, const BreakingApartConfig
     }
 }
 
-void resetBreakingApartStats() {
+auto resetBreakingApartStats() -> void {
     gBaBigChunks = 0;
     gBaDupBigChunks = 0;
     gBaQueryCount = 0;

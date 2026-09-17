@@ -25,7 +25,7 @@ enum class Mode { Baseline, BreakingApart };
 constexpr std::size_t kBaSmallDivisor = 4;
 
 // 以基准 TTTD 参数为 1 倍，按 scale 放大得到大块器；小块器 = 大块器 / kBaSmallDivisor。
-BreakingApartConfig makeBreakingConfig(const std::size_t scale) {
+auto makeBreakingConfig(const std::size_t scale) -> BreakingApartConfig {
     const ChunkerParams big{
             CONST_VALUE_MAIN_D * scale,
             CONST_VALUE_SECOND_D * scale,
@@ -51,14 +51,14 @@ struct RunStats {
     std::size_t baSmall;
 };
 
-RunStats snapshotStats() {
+auto snapshotStats() -> RunStats {
     return {gTotalChunks, gChunkPool.size(), gDupChunks, gTotalBytes, gUniqueBytes,
             gBaBigChunks, gBaDupBigChunks, gBaRechunkRegions, gBaSmallChunks};
 }
 
 // 打印单个文件的增量与累计 DER，便于按备份版本定位 2.3 的效果。
-void reportFileDelta(const std::filesystem::path& path, const Mode mode,
-                     const RunStats& before, const RunStats& after) {
+auto reportFileDelta(const std::filesystem::path& path, const Mode mode,
+                     const RunStats& before, const RunStats& after) -> void {
     const double cumDer = after.uniqueBytes
                               ? static_cast<double>(after.totalBytes) / static_cast<double>(after.uniqueBytes)
                               : 0.0;
@@ -82,7 +82,7 @@ void reportFileDelta(const std::filesystem::path& path, const Mode mode,
 // std::vector<std::string> str;
 
 // 读取单个文件并分块，返回后源缓冲即释放。
-void processFile(const std::filesystem::path& path, const Mode mode) {
+auto processFile(const std::filesystem::path& path, const Mode mode) -> void {
     std::ifstream ifs(path, std::ios::binary);
     if (!ifs) {
         std::cerr << "open failed: " << path.string() << '\n';
@@ -101,7 +101,7 @@ void processFile(const std::filesystem::path& path, const Mode mode) {
 // 遍历目录下所有普通文件逐个分块。
 // recursive=false：只处理顶层文件（DataSet_1）。
 // recursive=true ：连子目录一起遍历（DataSet_2 的解压源码树）。
-void processDirectory(const std::filesystem::path& dir, const bool recursive, const Mode mode) {
+auto processDirectory(const std::filesystem::path& dir, const bool recursive, const Mode mode) -> void {
     namespace fs = std::filesystem;
 
     std::vector<fs::path> files;
@@ -145,7 +145,7 @@ void processDirectory(const std::filesystem::path& dir, const bool recursive, co
 }
 
 // 目标既可以是单个文件，也可以是一个目录；目录按 recursive 决定是否递归。
-void resolver(const std::filesystem::path& target, const bool recursive, const Mode mode) {
+auto resolver(const std::filesystem::path& target, const bool recursive, const Mode mode) -> void {
     namespace fs = std::filesystem;
 
     std::error_code ec;
@@ -164,7 +164,7 @@ void resolver(const std::filesystem::path& target, const bool recursive, const M
 }
 
 // 兼容不同工作目录：优先 ../Dataset（在构建目录下运行），其次 Dataset（在仓库根运行）。
-std::filesystem::path datasetRoot() {
+auto datasetRoot() -> std::filesystem::path {
     namespace fs = std::filesystem;
     std::error_code ec;
     if (fs::is_directory("../Dataset", ec)) {

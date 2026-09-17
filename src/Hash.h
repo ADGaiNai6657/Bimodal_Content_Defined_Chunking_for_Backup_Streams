@@ -20,7 +20,7 @@ using Sha1Digest = std::array<std::uint8_t, 20>;
 
 // 内容哈希入口：对一段字节计算完整 SHA-1 摘要（160 位）。
 // data 为零拷贝视图；返回 20 字节摘要，作为唯一块的内容指纹。
-Sha1Digest sha1(std::string_view data);
+auto sha1(std::string_view data) -> Sha1Digest;
 
 // 窗口哈希：对定长滑动窗口取 SHA-1，再截断为 64 位整数。
 // 取摘要前 8 字节按大端拼接（最高位在前），供 pFinder 的 % D 判断切点；

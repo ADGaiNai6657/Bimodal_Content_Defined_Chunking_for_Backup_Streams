@@ -16,7 +16,7 @@ auto getChunkHash(const std::string_view str) -> ChunkHash {
 }
 
 /** Calculate the hash value of one data window (SHA-1 截断为 64 位). */
-auto getHashValue(const std::string_view content)-> std::uint64_t {
+auto getHashValue(const std::string_view content) -> std::uint64_t {
     return sha1WindowHash(content);
 }
 
