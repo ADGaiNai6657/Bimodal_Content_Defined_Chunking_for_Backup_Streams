@@ -10,12 +10,12 @@
 ```
 读一个文件(一次“备份”)的原始字节
    │
-   ├─ 用【大块器】把它切成若干“大块”          ← TTTD 分块
-   ├─ 用【小块器】把它切成若干“小块”（备用）    ← 更密的 TTTD 分块
+   ├─ 用【大块器】把它切成若干“大块”          ← TTTD 分块（只跑这一遍）
    │
    └─ 逐个大块问一句：这块以前存过吗？
         存过  → 原样发出去（会去重，不新增存储）
-        没存过，但左边或右边那块存过 → 说明这里是“变更边缘”，用小块细切后发出
+        没存过，但左边或右边那块存过 → 说明这里是“变更边缘”，
+                                      只对这一小段用【小块器】现切后发出
         其余  → 原样发出（大片新数据仍用大块，省元数据）
 ```
 
@@ -64,10 +64,13 @@
 
 ---
 
-## 3. `findBoundaries`：纯分块，不存不发射（`BreakingApart.cpp:46`）
+## 3. `findBoundaries` / `findBoundariesInRange`：纯分块，不存不发射
 
-**职责**：给一段字节，返回所有切点位置（升序），**不碰全局存储**。
-这就是把原来 `pFinder` 里“边算边发”的逻辑拆出来的结果。
+**职责**：给一段字节，返回切点位置（升序），**不碰全局存储**。
+- `findBoundariesInRange(data, b0, b1, params)`（`BreakingApart.cpp:46`）：只扫 `[b0, b1]`，但窗口取自整段 `data`（可越过 `b0` 左端），`min/max` 从 `b0` 起算。
+- `findBoundaries(data, params)`（`BreakingApart.cpp:89`）：等价于 `findBoundariesInRange(data, 0, data.size(), params)`。
+
+后者用于“大块/整文件”，前者用于“按需细切某个 change region”。
 
 核心循环（对每个字节位置 `pos`）：
 
@@ -96,15 +99,14 @@ else                  { last_P = pos;         boundaries.push_back(pos); }
 
 这是 2.3 的心脏。按行拆：
 
-### 4.1 先算两套切点，再决定怎么发
+### 4.1 只先算大块切点
 
 ```cpp
-const std::vector<std::size_t> big   = findBoundaries(data, config.big);
-const std::vector<std::size_t> small = findBoundaries(data, config.small);
+const std::vector<std::size_t> big = findBoundaries(data, config.big);
 ```
 
 - `big` 把文件切成 `n = big.size() + 1` 个大块。
-- `small` 是整文件的小块切点，**先全部算好**。为什么这样做？见 §7 的 Q&A。
+- **不再**开局就把整文件的小块切点算出来。小块切点只在 §4.3 情形② 真正需要时，才用 `findBoundariesInRange` 对该区间现算（见 §7 Q1）。
 
 `rangeOf(i)` 把第 `i` 个大块换算成字节区间 `[b0, b1)`：
 - 第 0 块从 0 开始；
@@ -128,9 +130,10 @@ next = query(i + 1);  // 下一个大块是否重复（前瞻 1 块）
 
 if (cur)                          // ① 自己就是重复的
     emitChunk(data, b0, b1);      //    原样按大块发出（会去重）
-else if (prevDup || next)         // ② 自己不重复，但挨着一个重复块
+else if (prevDup || next) {       // ② 自己不重复，但挨着一个重复块
+    auto small = findBoundariesInRange(data, b0, b1, config.small); // 只在这一段现算
     emitSmalls(data, b0, b1, small);  // 这是“变更边缘”，用小块细切
-else                              // ③ 大片新数据内部
+} else                            // ③ 大片新数据内部
     emitChunk(data, b0, b1);      //    仍按大块发出
 ```
 
@@ -188,8 +191,8 @@ b0 ──s1──s2──s3── b1
 
 ## 7. 常见困惑 Q&A
 
-**Q1：为什么小块切点要“整文件预计算”，而不是在 change region 里重跑？**
-A：为了让小块切点稳定。如果从每个大块的起点重跑小块器，同一条流里小块切点会随大块边界漂移，跨备份难以复现。整文件预计算后，小块切点只由内容决定，和“哪几个大块被重切”无关。
+**Q1：小块切点是怎么算的？为什么不在开局把整文件都算好？**
+A：只在真正要细切的 change region 内现算（`findBoundariesInRange`），其余地方不跑小块器。好处是省时间：无需重复扫描整文件（尤其首个备份/无变更文件完全不跑小块）。窗口仍取自整段 `data`，所以靠近 `b0` 的切点会受 `b0` 之前字节影响，切点依旧“内容定义”、同内容可复现。代价是它从 `b0` 起算 `min`，与“整文件全局对齐”的切点略有差异，结果数值会变。
 
 **Q2：为什么 `next` 在发射当前块之前就查询？**
 A：为了满足“每大块一次查询”。代价是当第 `i+1` 块与第 `i` 块内容相同时，`next` 会滞后一拍；但那种情况两者最终都走“按大块发射”，行为一致，不影响正确性。

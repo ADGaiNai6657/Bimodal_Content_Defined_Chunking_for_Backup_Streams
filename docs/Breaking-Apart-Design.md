@@ -55,8 +55,7 @@
 ```text
 processFile_BreakingApart(file):
     vChunks.emplace_back()                      // 本文件的出现记录组
-    big   = findBoundaries(file, kBIG)          // 末尾含 size()
-    small = findBoundaries(file, kSMALL)        // 末尾含 size()
+    big = findBoundaries(file, kBIG)            // 大块切点（只先算这一遍）
     n = big.size()                              // 大块数
     dup = vector<bool>(n)                       // 懒查询缓存
     prevDup = false
@@ -70,6 +69,7 @@ processFile_BreakingApart(file):
             emitBig(b0, b1)                     // 重复大块：原样存
             prevDup = true
         else if prevDup || next:
+            small = findBoundariesInRange(file, b0, b1, kSMALL) // 现算，仅此区间
             emitSmalls(b0, b1, small)           // transition：按 small 切点重切
             prevDup = false
         else:
@@ -88,12 +88,13 @@ processFile_BreakingApart(file):
 
 ### 3.4 小块切点来源（重要设计选择）
 
-论文实现先对整条流生成细粒度 summary（小块切点），rechunk 时从 summary 取。因此：
-
-- **推荐**：`smallBounds` 对**整文件**预计算，rechunk 时只取 `[b0,b1)` 内的切点。
-  - 优点：小块切点不随大块边界漂移，跨备份可复现；与论文一致。
-  - 代价：多一次整文件分块（可接受）。
-- 备选：从 `b0` 起在区域内重跑小块器。实现更简单，但小块切点依赖区域对齐，跨版本复现性差。不建议。
+- **当前采用**：按需区间细切。只在判定 change region 时，对 `[b0, b1)` 调用
+  `findBoundariesInRange(data, b0, b1, kSMALL)`。窗口取自整段 `data`（可越过 `b0` 左端），
+  `min/max` 从 `b0` 起算。
+  - 优点：不重复扫描整文件；首个备份 / 无变更文件完全不跑小块器。
+  - 代价：小块切点从 `b0` 起算 `min`，与“整文件全局对齐”的切点略有差异，结果数值会变。
+- 备选（论文 summary 做法）：整文件预计算小块切点，rechunk 时取区间内的点。
+  - 与论文一致、切点全局对齐，但每个文件都要多跑一整遍小块器。
 
 ---
 
