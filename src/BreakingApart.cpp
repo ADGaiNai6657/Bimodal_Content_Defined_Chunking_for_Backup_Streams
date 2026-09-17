@@ -157,17 +157,21 @@ auto processFileBreakingApart(const std::string& data, const BreakingApartConfig
     //    懒查询 + 缓存，使每个大块最多查询一次（论文“每大块一次查询”）。
     std::vector<int> isDup(n, -1);
 
+    //查询函数，检查第i块是否为重复块
     const auto query = [&](const std::size_t i) -> bool {
+
         if (i >= n) {
             return false; // 越界 = 没有下一块，按“非重复”处理。
         }
+
         if (isDup[i] < 0) { // 尚未查询过，才真正去查。
             const auto [b0, b1] = rangeOf(i);
             // 注意这里用的是 lookup（只读、不改索引），不是 emitChunk。
             isDup[i] = (lookup(std::string_view(data).substr(b0, b1 - b0)) != nullptr) ? 1 : 0;
             ++gBaQueryCount;
         }
-        return isDup[i] == 1;
+
+        return isDup[i] == 1;   //确认重复才返回重复。不重复或未查询皆返回不重复，应当细分
     };
 
     bool prevDup = false; // 上一个大块是否重复（用于识别“与重复相邻”）。
@@ -183,7 +187,7 @@ auto processFileBreakingApart(const std::string& data, const BreakingApartConfig
             emitChunk(data, b0, b1);
             ++gBaDupBigChunks;
             prevDup = true;
-        } else if (prevDup || next) {
+        } else if (prevDup || next) {   //本身为非重复大块（新数据），下一个/上一个为重复大块，即在边界，需要重新切块
             // ③b change region：自己新，但挨着重复块。
             //     只在这一段区间内现算小块切点，再切成小块发射。
             const std::vector<std::size_t> small =
@@ -191,7 +195,7 @@ auto processFileBreakingApart(const std::string& data, const BreakingApartConfig
             emitSmalls(data, b0, b1, small);
             ++gBaRechunkRegions;
             prevDup = false;
-        } else {
+        } else {    //本身为非重复大块（新数据），上/下一个大块也为非重复大块，即全新数据内部，根据论文原则，保存大块
             // ③c 大片新数据内部：仍按大块发射，保持块大、元数据少。
             emitChunk(data, b0, b1);
             // 依正文/Fig.2 语义，这里应置 false（论文 Fig.1 第 6 行印成 true，属笔误）。
