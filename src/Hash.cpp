@@ -20,7 +20,7 @@ namespace {
      * 因此不会随输入增长，也避免在滑窗热循环里反复 new/free。
      * data 为待摘要的字节视图；out 接收 20 字节摘要（由调用方保证足够大）。
      */
-    void sha1Into(const std::string_view data, unsigned char* out) {
+    auto sha1Into(const std::string_view data, unsigned char* out) -> void {
         thread_local EVP_MD_CTX* ctx = EVP_MD_CTX_new(); // 每线程仅分配一次，常驻复用。
         unsigned int length = 0;
         EVP_DigestInit_ex(ctx, EVP_sha1(), nullptr);      // 选中 SHA-1 并重置上下文。
@@ -34,7 +34,7 @@ namespace {
  * 内容哈希入口：对一段字节计算完整 SHA-1 摘要。
  * 返回 20 字节数组，作为 ChunkHash 写入唯一块并登记到 gChunkIndex。
  */
-Sha1Digest sha1(const std::string_view data) {
+auto sha1(const std::string_view data) -> Sha1Digest {
     Sha1Digest digest{};                 // 20 字节先清零，随后被摘要完整覆盖。
     sha1Into(data, digest.data());       // 复用公共原语，写入固定长度摘要。
     return digest;

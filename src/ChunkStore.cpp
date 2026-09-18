@@ -63,3 +63,19 @@ auto chunkStore(Chunk chunk) -> Chunk* {
 auto isExist(const ChunkHash &hash) -> bool {
     return gChunkIndex.contains(hash);
 }
+
+/**
+ * 精确存在性查询：与 chunkStore 的查重段相同，但只读、不计数、不插入。
+ * 用于 2.3 拆分式判定「这个大块此前是否已存储」；逐字节校验保证不误判。
+ */
+auto lookup(std::string_view content) -> Chunk* {
+    const ChunkHash hash = getChunkHash(content);
+    const auto range = gChunkIndex.equal_range(hash);
+    for (auto it = range.first; it != range.second; ++it) {
+        Chunk* candidate = it->second;
+        if (candidate->length == content.size() && std::string_view(candidate->data) == content) {
+            return candidate;
+        }
+    }
+    return nullptr;
+}

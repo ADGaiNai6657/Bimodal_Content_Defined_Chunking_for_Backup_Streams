@@ -10,11 +10,12 @@
 ## 1. 前提：索引的结构
 
 ```cpp
-inline std::deque<Chunk> gChunkPool;                            // 唯一块池
-inline std::unordered_multimap<ChunkHash, Chunk*> gChunkIndex;  // 内容索引
+inline std::deque<Chunk> gChunkPool;                                        // 唯一块池
+inline std::unordered_multimap<ChunkHash, Chunk*, Sha1DigestHash> gChunkIndex; // 内容索引
 ```
 
-- key = `ChunkHash`（内容哈希），value = `Chunk*`（指向 `gChunkPool` 中的唯一块）。
+- key = `ChunkHash`（= `Sha1Digest`，完整 160 位 SHA-1），value = `Chunk*`（指向 `gChunkPool` 中的唯一块）。
+- 第三个模板参数 `Sha1DigestHash` 是自定义桶哈希：`std::array` 没有默认 `std::hash`，故显式提供。
 - 使用 **`unordered_multimap`** 而不是 `unordered_map`，是因为哈希不唯一：不同内容可能算出同一个哈希（**碰撞**），它们必须以「相同 key 的多个 entry」共存。
 - 标准保证：`unordered_multimap` 中 key 等价的元素在迭代时**相邻排列**，因此 `equal_range` 能一次性圈出全部候选。
 - 为什么池用 `std::deque`：`push_back` 后既有元素的指针/引用**不失效**，所以 `gChunkIndex` 里保存的 `Chunk*` 长期安全。
@@ -90,6 +91,18 @@ return stored;
 - `std::move(chunk)` 把按值传入的参数内容移入池，避免再一次复制。
 - 取 `deque` 尾部稳定指针登记进索引；唯一块内容计入 `gUniqueBytes`。
 
+### 2.7 只读查询：`isExist` 与 `lookup`
+
+除 `chunkStore`（写 + 去重）外，还有两个**只读**入口（不计数、不插入）：
+
+```cpp
+auto isExist(const ChunkHash &hash) -> bool;      // 只看哈希，可能假阳性。
+auto lookup(std::string_view content) -> Chunk*;  // 精确：hash + 逐字节；命中返回指针，否则 nullptr。
+```
+
+- `isExist`（`ChunkStore.cpp:63`）只判断“这个哈希是否存在”，供统计/快速判断；哈希碰撞时可能假阳性。
+- `lookup`（`ChunkStore.cpp:71`）与 `chunkStore` 的查重段相同，但**只读**。2.4 合成式判定“大块以前是否存过”用的就是它（保证不误判）。
+
 ---
 
 ## 3. 为什么必须逐字节校验
@@ -154,5 +167,6 @@ return stored;
 | 索引 / 池 / 计数器的定义 | `src/DataAndMethod.h` |
 | `chunkStore` 查重主体 | `src/ChunkStore.cpp:30-56` |
 | 查重循环（本文重点） | `src/ChunkStore.cpp:38-48` |
-| `isExist` 存在性查询 | `src/ChunkStore.cpp:63-65` |
-| `emitChunk` 发射切片 | `src/DataAndMethod.cpp` |
+| `isExist` 哈希存在性查询 | `src/ChunkStore.cpp:63-65` |
+| `lookup` 精确只读查询 | `src/ChunkStore.cpp:71-81` |
+| `emitChunk` 发射切片 | `src/DataAndMethod.cpp:51-58` |

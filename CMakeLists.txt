@@ -19,6 +19,10 @@ add_executable(Bimodal_Content_Defined_Chunking_for_Backup_Streams
         src/DataAndMethod.h
         src/DataAndMethod.cpp
         src/ChunkStore.cpp
+        src/Chunker.h
+        src/Chunker.cpp
+        src/Amalgamation.h
+        src/Amalgamation.cpp
         src/Hash.h
         src/Hash.cpp)
 
