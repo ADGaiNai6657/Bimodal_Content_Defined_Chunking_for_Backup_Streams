@@ -14,6 +14,18 @@
 #include "BreakingApart.h"
 #include "DataAndMethod.h"
 
+// Windows 控制台默认使用本地码页（简体中文为 GBK/936），
+// 而程序字符串是 UTF-8；把控制台码页切到 UTF-8 可避免中文乱码。
+#ifdef _WIN32
+#  ifndef WIN32_LEAN_AND_MEAN
+#    define WIN32_LEAN_AND_MEAN
+#  endif
+#  ifndef NOMINMAX
+#    define NOMINMAX
+#  endif
+#  include <windows.h>
+#endif
+
 /*TTTD 算法核心迁移自 TTTD_Experiments*/
 
 using ull = unsigned long long;
@@ -208,6 +220,12 @@ auto datasetRoot() -> std::filesystem::path {
 //   6：拆分式（论文 2.3）跑 DataSet_4（合成集中变更备份流）。
 // 测试时可用管道喂入选择，例如：echo 6 | baseline.exe
 int main() {
+#ifdef _WIN32
+    // 让控制台按 UTF-8 解码程序输出：既修复中文乱码，也避免 CR 被吞导致的行重叠。
+    SetConsoleOutputCP(CP_UTF8);
+    SetConsoleCP(CP_UTF8);
+#endif
+
     namespace fs = std::filesystem;
 
     const fs::path root = datasetRoot();
