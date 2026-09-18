@@ -133,6 +133,7 @@ auto deriveSmallParams(const ChunkerParams& big, const std::size_t k) -> Chunker
             big.window};           // 窗口保持不变。
 }
 
+//改造算法，同时包含Baseline与BA两种行为
 auto processFileBreakingApart(const std::string& data, const BreakingApartConfig& config) -> void {
     // 本条流对应的位置组与出现记录组（与 baseline 的 pFinder 行为对齐）。
     vPosition.emplace_back();

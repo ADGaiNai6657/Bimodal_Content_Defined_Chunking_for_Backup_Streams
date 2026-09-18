@@ -51,17 +51,31 @@ struct RunStats {
     std::size_t baSmall;
 };
 
+//快照统计，仅签名，用于创建一个RunStat对象并返回
 auto snapshotStats() -> RunStats {
-    return {gTotalChunks, gChunkPool.size(), gDupChunks, gTotalBytes, gUniqueBytes,
-            gBaBigChunks, gBaDupBigChunks, gBaRechunkRegions, gBaSmallChunks};
+    return {gTotalChunks,
+              gChunkPool.size(),
+                gDupChunks,
+                 gTotalBytes,
+               gUniqueBytes,
+                    gBaBigChunks,
+                 gBaDupBigChunks,
+                          gBaRechunkRegions,
+                          gBaSmallChunks};
 }
 
 // 打印单个文件的增量与累计 DER，便于按备份版本定位 2.3 的效果。
-auto reportFileDelta(const std::filesystem::path& path, const Mode mode,
-                     const RunStats& before, const RunStats& after) -> void {
+auto reportFileDelta(const std::filesystem::path& path,
+                     const Mode mode,
+                     const RunStats& before,
+                     const RunStats& after)
+                     -> void {
+
+    //DER计算器
     const double cumDer = after.uniqueBytes
                               ? static_cast<double>(after.totalBytes) / static_cast<double>(after.uniqueBytes)
                               : 0.0;
+
     std::cout << "  " << path.filename().string()
               << " size=" << (after.totalBytes - before.totalBytes)
               << " chunks+=" << (after.totalChunks - before.totalChunks)
@@ -69,12 +83,14 @@ auto reportFileDelta(const std::filesystem::path& path, const Mode mode,
               << " dup+=" << (after.dupChunks - before.dupChunks)
               << " uniqueBytes+=" << (after.uniqueBytes - before.uniqueBytes)
               << " cumDER=" << std::fixed << std::setprecision(4) << cumDer;
+
     if (mode == Mode::BreakingApart) {
         std::cout << " big+=" << (after.baBig - before.baBig)
                   << " dupBig+=" << (after.baDupBig - before.baDupBig)
                   << " rechunk+=" << (after.baRechunk - before.baRechunk)
                   << " small+=" << (after.baSmall - before.baSmall);
     }
+
     std::cout << '\n';
 }
 
@@ -83,7 +99,7 @@ auto reportFileDelta(const std::filesystem::path& path, const Mode mode,
 
 // 读取单个文件并分块，返回后源缓冲即释放。
 auto processFile(const std::filesystem::path& path, const Mode mode) -> void {
-    std::ifstream ifs(path, std::ios::binary);
+    std::ifstream ifs(path, std::ios::binary);  //使用二进制方式读取文件
     if (!ifs) {
         std::cerr << "open failed: " << path.string() << '\n';
         return;
@@ -91,7 +107,7 @@ auto processFile(const std::filesystem::path& path, const Mode mode) -> void {
     // 每个文件只保留这一份原始字节，分块后立即释放。
     std::string buffer((std::istreambuf_iterator<char>(ifs)),
                        std::istreambuf_iterator<char>());
-    if (mode == Mode::Baseline) {
+    if (mode == Mode::Baseline) {    //是否普通模式/BA模式？
         pFinder(buffer);
     } else {
         processFileBreakingApart(buffer, gBreakingConfig);
@@ -101,7 +117,11 @@ auto processFile(const std::filesystem::path& path, const Mode mode) -> void {
 // 遍历目录下所有普通文件逐个分块。
 // recursive=false：只处理顶层文件（DataSet_1）。
 // recursive=true ：连子目录一起遍历（DataSet_2 的解压源码树）。
-auto processDirectory(const std::filesystem::path& dir, const bool recursive, const Mode mode) -> void {
+auto processDirectory(const std::filesystem::path& dir,
+                      const bool recursive,
+                      const Mode mode)
+                      -> void {
+
     namespace fs = std::filesystem;
 
     std::vector<fs::path> files;
@@ -145,16 +165,21 @@ auto processDirectory(const std::filesystem::path& dir, const bool recursive, co
 }
 
 // 目标既可以是单个文件，也可以是一个目录；目录按 recursive 决定是否递归。
-auto resolver(const std::filesystem::path& target, const bool recursive, const Mode mode) -> void {
+//内部会调用切分函数
+auto resolver(const std::filesystem::path& target,  //目标路径
+              const bool recursive,                 //是否使用递归遍历？
+              const Mode mode)                      //Baseline 还是 BA？
+-> void {
+
     namespace fs = std::filesystem;
 
     std::error_code ec;
-    if (fs::is_regular_file(target, ec)) {
-        const RunStats before = snapshotStats();
-        processFile(target, mode);
-        reportFileDelta(target, mode, before, snapshotStats());
-    } else if (fs::is_directory(target, ec)) {
-        processDirectory(target, recursive, mode);
+    if (fs::is_regular_file(target, ec)) {       //普通文件？普通遍历
+        const RunStats before = snapshotStats();    //new一个数据结构对象出来
+        processFile(target, mode);                  //开始切分
+        reportFileDelta(target, mode, before, snapshotStats()); //控制台打印报告
+    } else if (fs::is_directory(target, ec)) {      //文件夹目录？递归遍历
+        processDirectory(target, recursive, mode);  //递归遍历文件夹并切分
     } else {
         std::cerr << "not a file or directory: " << target.string() << '\n';
         return;
@@ -207,8 +232,9 @@ int main() {
     }
 
     fs::path target;
-    bool recursive = false;
+    bool recursive = false; //是否递归遍历？
     Mode mode = Mode::Baseline;
+    //用于处理目标数据集的递归遍历与否、采用Baseline还是BA
     switch (choice) {
         case 1:
             target = kDataSet1;
@@ -265,8 +291,8 @@ int main() {
             case 4: scale = 32; break;
             default: scale = 1; break;
         }
-        gBreakingConfig = makeBreakingConfig(scale);
-        resetBreakingApartStats();
+        gBreakingConfig = makeBreakingConfig(scale);//通过用户选定的规模来计算Config
+        resetBreakingApartStats();  //重置计数器
         std::cout << "大块参数 mainD=" << gBreakingConfig.big.mainD
                   << " secondD=" << gBreakingConfig.big.secondD
                   << " minT=" << gBreakingConfig.big.minT
@@ -280,8 +306,9 @@ int main() {
               << (mode == Mode::BreakingApart ? "  算法=拆分式2.3" : "  算法=baseline TTTD")
               << '\n';
 
-    resolver(target, recursive, mode);
+    resolver(target, recursive, mode);  //切分
 
+    //输出具体的边界信息
     constexpr bool kPrintBoundaries = false; // 边界数量很大，默认关闭，仅调试时打开。
     if (kPrintBoundaries) {
         for (std::size_t i = 0; i < vPosition.size(); i++) {
