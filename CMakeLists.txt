@@ -19,6 +19,8 @@ add_executable(Bimodal_Content_Defined_Chunking_for_Backup_Streams
         src/DataAndMethod.h
         src/DataAndMethod.cpp
         src/ChunkStore.cpp
+        src/BreakingApart.h
+        src/BreakingApart.cpp
         src/Hash.h
         src/Hash.cpp)
 

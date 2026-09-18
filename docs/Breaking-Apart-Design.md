@@ -1,7 +1,7 @@
 # 拆分式（Breaking-Apart）算法设计（论文 2.3）
 
 > 目标：在已有 baseline（TTTD 分块 + ChunkStore 去重）之上，复现论文第 2.3 节的 breaking-apart 算法。
-> 状态：设计文档，尚未实现。
+> 状态：**已实现**（`src/BreakingApart.h/.cpp`）。本文保留设计推导；实现细节与最新行号见 `docs/Breaking-Apart-Code-Guide.md`。
 > 命名：本项目中底层分块器统称 **TTTD**（Twin Threshold Two Divisors）。
 
 ---
@@ -40,23 +40,24 @@
 
 ### 3.1 数据结构
 
-- `struct ChunkerParams { std::size_t mainD, secondD, halfSecondD, minT, maxT, switchP, window; };`
-- `std::vector<std::size_t> findBoundaries(std::string_view data, const ChunkerParams&);`
-  （纯函数，返回切点，末尾追加 `data.size()` 作为哨兵）
+- `struct ChunkerParams { std::size_t mainD, secondD, minT, maxT, window; };`（TTTD，无切换参数）
+- `findBoundariesInRange(std::string_view data, std::size_t b0, std::size_t b1, const ChunkerParams&) -> std::vector<std::size_t>`
+  （纯函数，返回 `[b0, b1]` 内的切点，**不含文件末尾哨兵**）
+- `findBoundaries(std::string_view data, const ChunkerParams&) -> std::vector<std::size_t>`
+  （等价于 `findBoundariesInRange(data, 0, data.size(), ...)`）
 - 每个文件：
-  - `bigBounds = findBoundaries(file, kBIG);`
-  - `smallBounds = findBoundaries(file, kSMALL);`（**预先对整文件算一次**，见 3.4）
-  - 大块列表：`bigRange[i] = [prevBig, bigBounds[i])`，共 `bigBounds.size()` 块。
+  - `big = findBoundaries(file, kBIG);`（大块切点，只先算这一遍）
+  - 需要细切的 change region 才调 `findBoundariesInRange(file, b0, b1, kSMALL)` 现算小块（见 3.4）
+  - 大块列表：`bigRange[i] = [prevBig, big[i])`，共 `big.size() + 1` 块。
 - 每个大块一个 `dup[i]`（精确 `lookup`），懒查询 + 缓存。
-- 复用全局 `chunkStore` / `gChunkPool` / `isExist`，跨文件保留。
+- 复用全局 `chunkStore` / `gChunkPool` / `lookup`，跨文件保留。
 
 ### 3.2 主流程伪代码
 
 ```text
 processFile_BreakingApart(file):
     vChunks.emplace_back()                      // 本文件的出现记录组
-    big   = findBoundaries(file, kBIG)          // 末尾含 size()
-    small = findBoundaries(file, kSMALL)        // 末尾含 size()
+    big = findBoundaries(file, kBIG)            // 大块切点（只先算这一遍）
     n = big.size()                              // 大块数
     dup = vector<bool>(n)                       // 懒查询缓存
     prevDup = false
@@ -70,6 +71,7 @@ processFile_BreakingApart(file):
             emitBig(b0, b1)                     // 重复大块：原样存
             prevDup = true
         else if prevDup || next:
+            small = findBoundariesInRange(file, b0, b1, kSMALL) // 现算，仅此区间
             emitSmalls(b0, b1, small)           // transition：按 small 切点重切
             prevDup = false
         else:
@@ -88,26 +90,28 @@ processFile_BreakingApart(file):
 
 ### 3.4 小块切点来源（重要设计选择）
 
-论文实现先对整条流生成细粒度 summary（小块切点），rechunk 时从 summary 取。因此：
-
-- **推荐**：`smallBounds` 对**整文件**预计算，rechunk 时只取 `[b0,b1)` 内的切点。
-  - 优点：小块切点不随大块边界漂移，跨备份可复现；与论文一致。
-  - 代价：多一次整文件分块（可接受）。
-- 备选：从 `b0` 起在区域内重跑小块器。实现更简单，但小块切点依赖区域对齐，跨版本复现性差。不建议。
+- **当前采用**：按需区间细切。只在判定 change region 时，对 `[b0, b1)` 调用
+  `findBoundariesInRange(data, b0, b1, kSMALL)`。窗口取自整段 `data`（可越过 `b0` 左端），
+  `min/max` 从 `b0` 起算。
+  - 优点：不重复扫描整文件；首个备份 / 无变更文件完全不跑小块器。
+  - 代价：小块切点从 `b0` 起算 `min`，与“整文件全局对齐”的切点略有差异，结果数值会变。
+- 备选（论文 summary 做法）：整文件预计算小块切点，rechunk 时取区间内的点。
+  - 与论文一致、切点全局对齐，但每个文件都要多跑一整遍小块器。
 
 ---
 
 ## 4. 参数选择
 
-- 大块器 = 现有 `CONST_VALUE_*`（平均 ≈ 965 B）。
-- 小块器 = 大块参数整体缩 k 倍，k 取 4 或 8（论文「4–8×」）。窗口 `window` 需 `≤ minT`。
+- 大块器：基准 TTTD 参数（`mainD=540, secondD=270, minT=460, maxT=2800, window=48`，平均 ≈ 1000 B）。
+  实现中大块尺寸可整体放大（菜单选 1×/4×/16×/32×，对应平均约 1k/4k/16k/32k）。
+- 小块器 = 大块参数整体缩 k 倍（当前实现 k=4）。窗口 `window` 需 `≤ minT`。
 
-| k | minT | mainD | secondD | half | maxT | switchP |
-| --- | --- | --- | --- | --- | --- | --- |
-| 4 | 115 | 135 | 67 | 33 | 700 | 400 |
-| 8 | 57 | 67 | 33 | 16 | 350 | 200 |
+| k | minT | mainD | secondD | maxT |
+| --- | --- | --- | --- | --- |
+| 4 | 115 | 135 | 67 | 700 |
+| 8 | 57 | 67 | 33 | 350 |
 
-建议先跑 k=4、k=8 两点，看平均块长 / DER 曲线（对应论文 Fig.6 趋势）。窗口可继续用 48，也可同比缩小；论文窗口 12–48 均可。
+窗口保持 48（论文窗口 12–48 均可）。论文 Fig.6 的收益主要出现在大块区间（≳40k）。
 
 ---
 
@@ -126,7 +130,7 @@ processFile_BreakingApart(file):
 ## 6. 验证方法
 
 - **单文件**：第一个备份应无重复 → 除尾部外全是大块，`DER=1`，块数 ≈ 大块数（可与 baseline 对比）。
-- **多版本顺序处理**（DataSet_2 五个 emacs 版本）：`DER>1`，且**平均块长明显大于 baseline 在同等 DER 时**，即论文核心结论。
+- **多版本顺序处理**：`DataSet_3`（未压缩 tar，五版本）为真实数据；`DataSet_4`（合成集中变更）用于验证 P1/P2 成立时的收益。
 - 断言：`gTotalChunks == gChunkPool.size() + gDupChunks`；总 emit 字节 = 输入字节；查询次数 ≈ 大块数。
 - 与论文 Fig.6 做**定性**对照（不同 k 的曲线形状）。
 
@@ -134,17 +138,17 @@ processFile_BreakingApart(file):
 
 ## 7. 模块规划
 
-- 新增 `src/BreakingApart.h` / `src/BreakingApart.cpp`，放 `ChunkerParams`、`findBoundaries`、`processFile_BreakingApart`。
+- `src/BreakingApart.h/.cpp`：`ChunkerParams` / `BreakingApartConfig` / `findBoundariesInRange` / `findBoundaries` / `deriveSmallParams` / `processFileBreakingApart`。
 - `DataAndMethod` 保留公共原语（`chunkStore` / `lookup` / `isExist` / `emitChunk` / SHA-1）。
-- `Baseline.cpp` 菜单加选项 3「拆分式（2.3）」，数据集选择复用现有逻辑。
-- 统计输出扩展：`bigChunks / dupBigChunks / queries / avgBigLen / avgSmallLen / DER`。
+- `Baseline.cpp` 菜单：`4` = 2.3 @DataSet_3，`6` = 2.3 @DataSet_4；选后追加询问大块平均尺寸。
+- 统计输出：`bigChunks / dupBigChunks / queries / rechunkRegions / smallChunks / DER`。
 
 ---
 
-## 8. 待定问题
+## 8. 已决问题（原“待定”，均已落地）
 
-1. transition 判据固定 `N=R=D=1`，还是做成参数？
-2. Fig.1 第 6 行按 `false` 修正，还是严格照抄伪代码？
-3. 小块切点采用「整文件预计算」（推荐）还是「区域内重跑」？
-4. k 先取 4，还是 4+8 都跑？
-5. 2.3 做进 `Baseline` 菜单，还是独立可执行？
+1. transition 判据：固定 `N=R=D=1`（同论文）。
+2. Fig.1 第 6 行：按 `false` 修正（与正文/Fig.2 一致）。
+3. 小块切点：采用「按需区间现算」（全数据窗口）；未采用整文件预计算。
+4. k：实现 k=4，大块尺寸可配置（1×/4×/16×/32×）。
+5. 集成：做进 `Baseline` 菜单（选项 4/6），非独立可执行。

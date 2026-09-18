@@ -50,10 +50,10 @@ inline std::vector<std::vector<ull>> vDiff;
 // ------------- ------------------ 哈希与切片 --------------------------------
 
 // 内容哈希入口：对一段字节计算完整 SHA-1 摘要作为 ChunkHash。
-ChunkHash getChunkHash(std::string_view str);
+auto getChunkHash(std::string_view str) -> ChunkHash;
 
 // 取“结束于 end”的定长窗口 [end-length, end)；流首不足 length 时取 [0, end)。
-std::string_view getSubString(std::string_view str, std::size_t end, std::size_t length);
+auto getSubString(std::string_view str, std::size_t end, std::size_t length) -> std::string_view;
 
 // 取整个 Chunk 的内容视图，用于计算哈希与逐字节比较。
 auto getSubString(const Chunk &chunk) -> std::string_view;
@@ -61,19 +61,19 @@ auto getSubString(const Chunk &chunk) -> std::string_view;
 // ------------------------------- 分块与发射 --------------------------------
 
 // 计算每个文件相邻边界的差值（块长）。
-std::vector<std::vector<ull>> diffCalculator(const std::vector<std::vector<ull>>& v);
+auto diffCalculator(const std::vector<std::vector<ull>>& v) -> std::vector<std::vector<ull>>;
 
 // 对一批数据流依次分块（每个元素对应一个文件/一条流）。
-void pFinder(std::vector<std::string>& str);
+auto pFinder(std::vector<std::string>& str) -> void;
 
 // TTTD 核心：对单个数据流产生边界，并把边界间的数据发射给 ChunkStore。
-void pFinder(const std::string& str);
+auto pFinder(const std::string& str) -> void;
 
 // 旧版冒烟测试路径：按行读 Dataset/temp.txt。
-void strPushback(std::vector<std::string>& str);
+auto strPushback(std::vector<std::string>& str) -> void;
 
 // 把 data 的 [begin, end) 切片交给 chunkStore 去重，并追加一条出现记录到 vChunks。
-void emitChunk(const std::string& data, std::size_t begin, std::size_t end);
+auto emitChunk(const std::string& data, std::size_t begin, std::size_t end) -> void;
 
 // ------------------------------- 去重存储 ----------------------------------
 
@@ -82,6 +82,10 @@ auto chunkStore(Chunk chunk) -> Chunk*;
 
 // 存在性查询：供后续 bimodal（2.3/2.4）算法判断候选块是否已存。
 auto isExist(const ChunkHash &hash) -> bool;
+
+// 精确存在性查询：命中返回唯一块指针，否则 nullptr；只读，不改索引与统计。
+// 2.3 拆分式用它判断大块是否重复（逐字节校验，避免哈希碰撞误判）。
+auto lookup(std::string_view content) -> Chunk*;
 
 // 唯一块：独占一份内容，代表全局去重后真正需要存储的数据。
 struct Chunk {
