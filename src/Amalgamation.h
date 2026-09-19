@@ -10,7 +10,7 @@
 //   1) 用小块器把流切成 m 个小块；
 //   2) 在窗口 buf[0..2k-1] 上做前向搜索，找第一个重复的大块（k 个连续小块）：
 //        a. 找到（位置 pos）-> 先把 pos 个前导小块按小块发射，再把该大块按大块发射；
-//        b. 没找到，但刚离开重复区（isPrevDupBig）-> 发射 k 个小块（transition）；
+//        b. 没找到，但刚离开重复区（prevBigWasDup）-> 发射 k 个小块（transition）；
 //        c. 其余（大片新数据内部）-> 把 k 个小块合成一个大块发射。
 //   3) 重复上述步骤，剩余不足 k 个小块时全部按小块发射（尾块）。
 //
@@ -30,8 +30,8 @@
 
 // 2.4 合成式参数。
 struct AmalgamationConfig {
-    ChunkerParams small; // 小块器参数：先跑它得到整条流的小块切点。
-    std::size_t k;       // 每个大块由 k 个连续小块合成（k-fixed）。
+    ChunkerParams small;   // 小块器参数：先跑它得到整条流的小块切点。
+    std::size_t k;         // 每个大块由 k 个连续小块合成（k-fixed，与论文记法一致）。
 };
 
 // 对一条数据流执行合成式分块，并把块发射给 ChunkStore（去重）。

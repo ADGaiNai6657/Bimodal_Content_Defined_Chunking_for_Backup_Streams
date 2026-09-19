@@ -50,7 +50,7 @@ auto emitChunk(const std::string& data, std::size_t begin, std::size_t end) -> v
 }
 
 /** Find TTTD chunk boundaries for every loaded file. */
-auto pFinder(std::vector<std::string>& str) -> void {
+auto pFinder(const std::vector<std::string>& str) -> void {
     for (auto& s : str) {
         pFinder(s); // One boundary group per element.
     }

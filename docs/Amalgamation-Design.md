@@ -14,7 +14,7 @@
 
   1. 前向搜索 `pos = 0..k`，找第一个重复大块 `buf[pos .. pos+k-1]`；
      命中 → 先发射前导小块 `buf[0..pos-1]`，再发射该大块（lines 3–6）；
-  2. 未命中，但 `isPrevDupBig`（刚离开重复区）→ 发射 `k` 个小块（lines 7–8）；
+  2. 未命中，但刚离开重复区（Fig.3 中的 `isPrevDupBig`，实现名 `prevBigWasDup`）→ 发射 `k` 个小块（lines 7–8）；
   3. 其余（大片新数据内部）→ 把 `buf[0..k-1]` 合成大块发射（line 9）。
 
 - 查询量：k-fixed 每大块最多 `k` 次（每小块一次）；对比 2.3 拆分式的「每大块一次」。
@@ -36,7 +36,7 @@
 | 窗口哈希 | `sha1WindowHash`（48B 截断 64 位） | 供小块器复用 |
 
 关键结论：2.4 不需要新的存储原语，只需「**小块器全流分块**」+「按 `k` 滑动窗口做大块查询与决策」。
-真正新增的是切片序列的索引方式（小块起点数组 `starts`）与合成式主循环。
+真正新增的是切片序列的索引方式（小块起点数组 `smallStart`）与合成式主循环。
 
 ---
 
@@ -45,55 +45,55 @@
 ### 3.1 数据结构
 
 - `struct ChunkerParams { std::size_t mainD, secondD, minT, maxT, window; };`（见 `Chunker.h`）
-- `struct AmalgamationConfig { ChunkerParams small; std::size_t k; };`（小块器参数 + 每大块的小块数）
+- `struct AmalgamationConfig { ChunkerParams small; std::size_t k; };`（小块器参数 + 每大块的小块数；实现内把 `config.k` 读入局部 `k_smallsPerBig` 使用）
 - 每个文件：
-  - `cuts = findBoundaries(file, config.small);`（整条流的小块切点，一次算完）
-  - 展开为小块起点数组 `starts`：`starts[0] = 0`，随后是 `cuts`，末尾补 `data.size()`；
-    于是共有 `m = starts.size() - 1` 个小块，第 `j` 个为 `[starts[j], starts[j+1])`。
-  - `isDup[a]`：从第 `a` 个小块开始的大块是否重复的缓存（`-1` 未知 / `0` 否 / `1` 是）。
+  - `smallCuts = findBoundaries(file, config.small);`（整条流的小块切点，一次算完）
+  - 展开为小块起点数组 `smallStart`：`smallStart[0] = 0`，随后是 `smallCuts`，末尾补 `data.size()`；
+    于是共有 `smallCount = smallStart.size() - 1` 个小块，第 `j` 个为 `[smallStart[j], smallStart[j+1])`。
+  - `dupCache[firstSmall]`：从第 `firstSmall` 个小块开始的大块是否重复的缓存（`-1` 未知 / `0` 否 / `1` 是）。
 - 复用全局 `chunkStore` / `gChunkPool` / `lookup`，跨文件保留。
 
 ### 3.2 主流程伪代码（对应 Fig.3）
 
 ```text
 processFile_Amalgamation(file):
-    vChunks.emplace_back()                      // 本文件的出现记录组
-    cuts  = findBoundaries(file, kSMALL)        // 整条流一次切成小块
-    starts = [0] + cuts + [size]                // 小块起点（共 m 个小块）
-    isDup = vector<int>(m, -1)                  // 大块重复缓存
-    isPrevDupBig = false
-    i = 0
+    vChunks.emplace_back()                              // 本文件的出现记录组
+    smallCuts  = findBoundaries(file, small)            // 整条流一次切成小块
+    smallStart = [0] + smallCuts + [size]               // 小块起点（共 smallCount 个小块）
+    dupCache   = vector<int>(smallCount, -1)            // 大块重复缓存
+    prevBigWasDup = false
+    nextSmall = 0
 
-    while i < m:
-        if m - i < k:                           // 尾部不足一个大块
-            emitSmalls(i, m-i); break
+    while nextSmall < smallCount:
+        if smallCount - nextSmall < k:       // 尾部不足一个大块
+            emitSmalls(nextSmall, smallCount-nextSmall); break
 
-        handled = false
-        for pos in 0 .. k:                      // 前向搜索（Fig.3 lines 2-6）
-            if i + pos + k > m: break
-            a = i + pos
-            if queryBig(a):                     // 找到重复大块
-                emitSmalls(i, pos)              // 前导小块
-                emitBig(a); isPrevDupBig = true
-                i = a + k; handled = true; break
-            if isPrevDupBig:                    // 离开重复区（lines 7-8）
-                emitSmalls(i, k); isPrevDupBig = false
-                i += k; handled = true; break
-        if handled: continue
-        emitBig(i); isPrevDupBig = false        // 新鲜区合成大块（lines 9-10）
-        i += k
+        emitted = false
+        for lookahead in 0 .. k:             // 前向搜索（Fig.3 lines 2-6）
+            if nextSmall + lookahead + k > smallCount: break
+            bigStart = nextSmall + lookahead
+            if isBigStored(bigStart):                   // 找到重复大块
+                emitSmalls(nextSmall, lookahead)        // 前导小块
+                emitBig(bigStart); prevBigWasDup = true
+                nextSmall = bigStart + k; emitted = true; break
+            if prevBigWasDup:                           // 离开重复区（lines 7-8）
+                emitSmalls(nextSmall, k); prevBigWasDup = false
+                nextSmall += k; emitted = true; break
+        if emitted: continue
+        emitBig(nextSmall); prevBigWasDup = false       // 新鲜区合成大块（lines 9-10）
+        nextSmall += k
 ```
 
-- `queryBig(a)`：`lookup(file.substr(starts[a], starts[a+k]-starts[a])) != nullptr`；懒查询 + 缓存，避免同一窗口重复查询。
-- `emitSmalls(a, count)`：把 `[starts[a], starts[a+count])` 按小块逐个 `emitChunk`。
-- `emitBig(a)`：把 `[starts[a], starts[a+k])` 作为**一个**大块 `emitChunk`。因为 `k` 个小块在源数据中首尾相接，大块就是一段连续字节，无需真正拼接。
+- `isBigStored(firstSmall)`：`lookup(file.substr(smallStart[firstSmall], smallStart[firstSmall+k]-smallStart[firstSmall])) != nullptr`；懒查询 + 缓存，避免同一窗口重复查询。
+- `emitSmalls(firstSmall, numSmalls)`：把 `[smallStart[firstSmall], smallStart[firstSmall+numSmalls])` 按小块逐个 `emitChunk`。
+- `emitBig(firstSmall)`：把 `[smallStart[firstSmall], smallStart[firstSmall+k])` 作为**一个**大块 `emitChunk`。因为 `k` 个小块在源数据中首尾相接，大块就是一段连续字节，无需真正拼接。
 
 ### 3.3 前导小块 / transition / 合成：三种发射的解释
 
 | 场景 | 发射内容 | 论文位置 | 目的 |
 | --- | --- | --- | --- |
-| 找到重复大块，起始在 `pos > 0` | 前导 `pos` 个小块 | lines 4 | 让「进入重复区」的边界精确到小块 |
-| 刚离开重复区（`isPrevDupBig`） | `k` 个小块 | lines 7 | 让「离开重复区」的边界精确到小块 |
+| 找到重复大块，起始在 `lookahead > 0` | 前导 `lookahead` 个小块 | lines 4 | 让「进入重复区」的边界精确到小块 |
+| 刚离开重复区（`prevBigWasDup`） | `k` 个小块 | lines 7 | 让「离开重复区」的边界精确到小块 |
 | 大片新数据内部 | 合成 1 个大块 | lines 9 | 新数据仍用大块，省元数据 |
 
 前导小块与 transition 都只在**重复/非重复交界处**出现，故 transition 总量受大块数约束，而不会全流碎片化。
@@ -106,7 +106,7 @@ processFile_Amalgamation(file):
 ### 3.5 查询与缓存
 
 - 每个小块位置最多发起一次大块查询，`gAmQueryCount` 统计实际查询次数；k-fixed 的上界约为「每大块 k 次」。
-- 重复文件上，前向搜索通常在 `pos = 0` 立即命中，故查询量趋近「每大块 1 次」；只有在大片新数据里才会做满 `k+1` 次前向探测。
+- 重复文件上，前向搜索通常在 `lookahead = 0` 立即命中，故查询量趋近「每大块 1 次」；只有在大片新数据里才会做满 `k+1` 次前向探测。
 - 查询用 `lookup`（只读、不计数、不插入），真正发射时才由 `chunkStore` 计一次发射并去重。
 
 ---
@@ -139,11 +139,11 @@ processFile_Amalgamation(file):
 
 ## 5. 关键陷阱
 
-1. **Fig.3 第 10 行 `isPrevDupBig=true` 与正文/描述矛盾**：line 9 明确是 “Regions considered fresh data … emitted as big chunks”，其后应置 `false`，否则会把后续新鲜块连锁当作 transition。实现按 `false` 修正，并在源码注释中记录。
-2. `isBigDup` 的语义是「**此前已存储**」：包含上次备份与本轮此前 emit 的块。不要跨文件缓存 `isDup`（store 在变）。
+1. **Fig.3 第 10 行 `prevBigWasDup=true` 与正文/描述矛盾**：line 9 明确是 “Regions considered fresh data … emitted as big chunks”，其后应置 `false`，否则会把后续新鲜块连锁当作 transition。实现按 `false` 修正，并在源码注释中记录。
+2. `isBigDup` 的语义是「**此前已存储**」：包含上次备份与本轮此前 emit 的块。不要跨文件缓存 `dupCache`（store 在变）。
 3. `lookup` 必须**逐字节校验**，否则哈希碰撞会把新鲜大块误判为重复。
-4. 前导小块不能丢：`pos > 0` 时必须先发射 `[i, i+pos)`，否则字节覆盖出现空洞。
-5. transition 应发**恰好 `k` 个**小块（论文 lookahead 为 `2k-1` 时的行为），不是 `k-1`。
+4. 前导小块不能丢：`lookahead > 0` 时必须先发射 `[nextSmall, nextSmall+lookahead)`，否则字节覆盖出现空洞。
+5. transition 应发**恰好 `k` 个**小块（论文 lookahead 为 `2k-1` 时的行为），不是少一个。
 6. 字节覆盖不重不漏：三种发射互不重叠，断言 `sum(emit 长度) == 文件大小`。
 7. 重复大块的 emit：调用 `chunkStore` 后返回既有指针，不新增 `uniqueBytes`（store 已处理）。
 8. `k` 越大，每次「离开重复区」要发射的 transition 小块越多（最长 `k` 个小块），平均块长升高但 DER 可能下降；这是参数权衡，不是缺陷。

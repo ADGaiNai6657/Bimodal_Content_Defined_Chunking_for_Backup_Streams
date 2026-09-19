@@ -58,7 +58,7 @@ auto getSubString(const Chunk &chunk) -> std::string_view;
 auto diffCalculator(const std::vector<std::vector<ull>>& v) -> std::vector<std::vector<ull>>;
 
 // 对一批数据流依次分块（每个元素对应一个文件/一条流）。
-auto pFinder(std::vector<std::string>& str) -> void;
+auto pFinder(const std::vector<std::string>& str) -> void;
 
 // TTTD 核心：对单个数据流产生边界，并把边界间的数据发射给 ChunkStore。
 auto pFinder(const std::string& str) -> void;

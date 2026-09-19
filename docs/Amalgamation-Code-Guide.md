@@ -49,9 +49,9 @@
 1. `src/Chunker.h` —— 先认类型：`ChunkerParams`(`:19`) 与基准参数 `kBaselineParams`(`:32`)。
 2. `src/Chunker.cpp:14 findBoundariesInRange` / `:68 findBoundaries` —— 最基础的“怎么切”。
 3. `src/Amalgamation.h:32 AmalgamationConfig` —— 2.4 的参数：`{ small, k }`。
-4. `src/Amalgamation.cpp:60 processFileAmalgamation` —— 2.4 的主循环（最核心）。
-5. `src/Amalgamation.cpp:33 emitSmallsAt` / `:48 emitBigAt` —— 主循环调用的两种发射。
-6. `src/Amalgamation.cpp:93 queryBig` —— 大块“以前存过吗”（只读 `lookup`）。
+4. `src/Amalgamation.cpp:61 processFileAmalgamation` —— 2.4 的主循环（最核心）。
+5. `src/Amalgamation.cpp:33 emitSmallsAt` / `:49 emitBigAt` —— 主循环调用的两种发射。
+6. `src/Amalgamation.cpp:94 isBigStored` —— 大块“以前存过吗”（只读 `lookup`）。
 7. `src/ChunkStore.cpp:71 lookup` —— 精确只读查询。
 8. `src/DataAndMethod.cpp:43 emitChunk` —— 主循环与存储之间的桥。
 9. `src/Baseline.cpp:112 processFile` / `:131 processDirectory` / `:180 resolver` —— 驱动层。
@@ -81,12 +81,14 @@
 
 ```cpp
 struct AmalgamationConfig {
-    ChunkerParams small; // 小块器参数
-    std::size_t k;       // 每个大块由 k 个连续小块合成（k-fixed）
+    ChunkerParams small;   // 小块器参数
+    std::size_t k;         // 每个大块由几个连续小块合成（k-fixed，与论文记法一致）
 };
 ```
 
 2.4 只需要两件事：**用多细的小块器**、**几个小块合成一个大块**。大块尺寸由 `small` 的平均块长 × `k` 决定。
+
+> 实现细节：`processFileAmalgamation` 把 `config.k` 读入局部变量 `k_smallsPerBig`（比单字母更易读），后续都用它；配置字段本身仍叫 `k`。
 
 ### 统计量（`Amalgamation.h:44-48`）
 
@@ -98,7 +100,7 @@ struct AmalgamationConfig {
 - `gAmQueryCount`：大块存在性查询次数（论文：每大块最多 k 次）。
 - `gAmSmallEmitted`：以小块的粒度单独发射的小块数（前导 + transition + 尾块）。
 
-> 复用统计量前，驱动层会先调 `resetAmalgamationStats()`（`Amalgamation.cpp:157`）清零。
+> 复用统计量前，驱动层会先调 `resetAmalgamationStats()`（`Amalgamation.cpp:163`）清零。
 
 ---
 
@@ -135,32 +137,33 @@ else                  { last_P = pos;         boundaries.push_back(pos); }
 
 ---
 
-## 4. 主循环 `processFileAmalgamation`（`Amalgamation.cpp:60`）
+## 4. 主循环 `processFileAmalgamation`（`Amalgamation.cpp:61`）
 
 这是 2.4 的心脏。按段拆：
 
 ### 4.1 先跑小块器，建立小块起点数组
 
 ```cpp
-const std::vector<std::size_t> cuts = findBoundaries(data, config.small);
-std::vector<std::size_t> starts;
-starts.push_back(0);
-starts.insert(starts.end(), cuts.begin(), cuts.end());
-starts.push_back(data.size());
-const std::size_t m = starts.size() - 1;   // 小块总数
+const std::vector<std::size_t> smallCuts = findBoundaries(data, config.small);
+std::vector<std::size_t> smallStart;                     // 小块起始字节偏移
+smallStart.push_back(0);                                 // 首哨兵
+smallStart.insert(smallStart.end(), smallCuts.begin(), smallCuts.end());
+smallStart.push_back(data.size());                       // 尾哨兵
+const std::size_t smallCount = smallStart.size() - 1;    // 小块总数
 ```
 
-- `starts` 是“每个小块的起始字节偏移”：第 `j` 个小块是 `[starts[j], starts[j+1])`。
-- 大块也用它表示：从第 `a` 个小块起的 `k` 个小块合成的大块，就是 `[starts[a], starts[a+k])`。
+- `smallStart` 是“每个小块的起始字节偏移”：第 `j` 个小块是 `[smallStart[j], smallStart[j+1])`。
+- 大块也用它表示：从第 `firstSmall` 个小块起的 `k` 个小块合成的大块，就是 `[smallStart[firstSmall], smallStart[firstSmall+k])`。
 - 空流直接返回（`Amalgamation.cpp:65`）。
 
 ### 4.2 “这个大块重复吗？”——查询与缓存
 
 ```cpp
-std::vector<int> isDup(m, -1);             // -1 未知 / 0 非重复 / 1 重复
-queryBig(a):
-    若 a+k > m      → false（构不成大块）
-    若 isDup[a] 未知 → lookup(第 a 个开始的大块) → 写入 isDup[a]，并 ++gAmQueryCount
+std::vector<int> dupCache(smallCount, -1);  // -1 未知 / 0 非重复 / 1 重复
+isBigStored(firstSmall):
+    若 firstSmall + k > smallCount → false（构不成大块）
+    若 dupCache[firstSmall] 未知 → lookup(第 firstSmall 个开始的大块)
+                                 → 写入 dupCache[firstSmall]，并 ++gAmQueryCount
 ```
 
 - `lookup` 是**只读**的“以前存过吗”，不会顺便把块存进去。
@@ -169,26 +172,30 @@ queryBig(a):
 ### 4.3 主循环体（三种处理）
 
 ```cpp
-while (i < m) {
-    if (m - i < k) { emitSmallsAt(i, m - i); break; }   // 尾部不足一个大块
+while (nextSmall < smallCount) {
+    if (smallCount - nextSmall < k) {              // 尾部不足一个大块
+        emitSmallsAt(nextSmall, smallCount - nextSmall); break;
+    }
 
-    for (pos = 0; pos <= k && i+pos+k <= m; ++pos) {    // 前向搜索
-        a = i + pos;
-        if (queryBig(a)) {                              // ① 找到重复大块
-            emitSmallsAt(i, pos);                       //    先发前导小块
-            emitBigAt(a, k);                            //    再发大块
-            isPrevDupBig = true; i = a + k; handled = true; break;
+    for (lookahead = 0;
+         lookahead <= k && nextSmall+lookahead+k <= smallCount;
+         ++lookahead) {                                       // 前向搜索
+        bigStart = nextSmall + lookahead;
+        if (isBigStored(bigStart)) {                          // ① 找到重复大块
+            emitSmallsAt(nextSmall, lookahead);               //    先发前导小块
+            emitBigAt(bigStart, k);                //    再发大块
+            prevBigWasDup = true; nextSmall = bigStart + k; emitted = true; break;
         }
-        if (isPrevDupBig) {                             // ② 离开重复区
-            emitSmallsAt(i, k);                         //    连发 k 个小块
-            isPrevDupBig = false; i += k; handled = true; break;
+        if (prevBigWasDup) {                                  // ② 离开重复区
+            emitSmallsAt(nextSmall, k);            //    连发 k 个小块
+            prevBigWasDup = false; nextSmall += k; emitted = true; break;
         }
     }
-    if (handled) continue;
+    if (emitted) continue;
 
-    emitBigAt(i, k);                                    // ③ 新鲜区合成大块
-    isPrevDupBig = false;                               //    ← 见 Q&A Q2
-    i += k;
+    emitBigAt(nextSmall, k);                       // ③ 新鲜区合成大块
+    prevBigWasDup = false;                                    //    ← 见 Q&A Q2
+    nextSmall += k;
 }
 ```
 
@@ -199,15 +206,16 @@ while (i < m) {
 ### 4.4 两种发射 `emitSmallsAt` / `emitBigAt`
 
 ```cpp
-emitSmallsAt(data, starts, a, count):        // Amalgamation.cpp:33
-    for j in [a, a+count): emitChunk(data, starts[j], starts[j+1]); ++gAmSmallEmitted;
+emitSmallsAt(data, smallStart, firstSmall, numSmalls):   // Amalgamation.cpp:33
+    for smallIndex in [firstSmall, firstSmall+numSmalls):
+        emitChunk(data, smallStart[smallIndex], smallStart[smallIndex+1]); ++gAmSmallEmitted;
 
-emitBigAt(data, starts, a, k):               // Amalgamation.cpp:48
-    emitChunk(data, starts[a], starts[a+k]); ++gAmBigChunks;
+emitBigAt(data, smallStart, firstSmall, k):   // Amalgamation.cpp:49
+    emitChunk(data, smallStart[firstSmall], smallStart[firstSmall+k]); ++gAmBigChunks;
 ```
 
 - 小块逐段发射；大块把 `k` 个小块**当一段连续字节**一次发射（源数据里本就相邻，无需拼接）。
-- 两者都经过 `emitChunk`（`DataAndMethod.cpp:51`），由 `chunkStore` 负责去重与统计。
+- 两者都经过 `emitChunk`（`DataAndMethod.cpp:43`），由 `chunkStore` 负责去重与统计。
 
 ---
 
@@ -253,22 +261,22 @@ emitBigAt(data, starts, a, k):               // Amalgamation.cpp:48
 ## 7. 常见困惑 Q&A
 
 **Q1：为什么大块不用真的把这 `k` 个小块拼起来？**
-A：小块是同一整条流上相邻切出的，`k` 个连续小块在源数据里首尾相接；大块就是 `[starts[a], starts[a+k])` 一段连续字节，`lookup`/`emitChunk` 直接对它取视图即可。
+A：小块是同一整条流上相邻切出的，`k` 个连续小块在源数据里首尾相接；大块就是 `[smallStart[firstSmall], smallStart[firstSmall+k])` 一段连续字节，`lookup`/`emitChunk` 直接对它取视图即可。
 
-**Q2：新鲜区发射大块后为什么把 `isPrevDupBig` 置 `false`？**
+**Q2：新鲜区发射大块后为什么把 `prevBigWasDup` 置 `false`？**
 A：它表示“上一个大块是否是重复块”。刚发的是新数据，当然不是重复，所以 `false`。论文 Fig.3 第 10 行印成 `true`，与正文 “Regions considered fresh data … emitted as big chunks” 矛盾，按语义修正。
 
-**Q3：前导小块（`emitSmallsAt(i, pos)`）是干什么的？**
-A：当重复大块从 `pos > 0` 才开始，`[i, i+pos)` 这段还是新数据；必须先零散发掉，否则字节覆盖会出现空洞（也不能简单并进大块，否则大块边界就不是内容定义的了）。
+**Q3：前导小块（`emitSmallsAt(nextSmall, lookahead)`）是干什么的？**
+A：当重复大块从 `lookahead > 0` 才开始，`[nextSmall, nextSmall+lookahead)` 这段还是新数据；必须先零散发掉，否则字节覆盖会出现空洞（也不能简单并进大块，否则大块边界就不是内容定义的了）。
 
-**Q4：transition 为什么是 `k` 个而不是 `k-1` 个？**
+**Q4：transition 为什么是 `k` 个而不是少一个？**
 A：论文 lookahead 为 `2k-1`，line 7 明确是 “emit k smalls”。发满 `k` 个小块保证离开重复区后的一整段都用细粒度收边，避免遗留非内容定义的大块。
 
 **Q5：尾部为什么全部发小块？**
 A：剩余不足 `k` 个小块就构不成一个大块，只能按小块发（对应 Fig.4(e) 的 straggling small chunk）。
 
 **Q6：为什么查询次数比 2.3 多？**
-A：2.3 每大块查 1 次；k-fixed 合成式最坏每大块查 `k+1` 次（前向每小块一次）。在重复数据上通常 `pos=0` 就命中，实际接近每大块 1 次；只有大片新数据才会做满前向探测。
+A：2.3 每大块查 1 次；k-fixed 合成式最坏每大块查 `k+1` 次（前向每小块一次）。在重复数据上通常 `lookahead=0` 就命中，实际接近每大块 1 次；只有大片新数据才会做满前向探测。
 
 **Q7：为什么 `k` 越大 DER 可能反而下降？**
 A：`k` 越大，离开重复区时要连发的 transition 小块越多（最长 `k` 个），这些小块往往落在变更区、重复率低，于是平均块长变大但 DER 略降。这是论文 Fig.5/Fig.6 展示的参数权衡。
