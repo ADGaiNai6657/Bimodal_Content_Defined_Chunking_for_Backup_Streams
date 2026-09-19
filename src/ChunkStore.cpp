@@ -36,7 +36,7 @@ auto chunkStore(Chunk chunk) -> Chunk* {
     gTotalBytes += chunk.length;
 
     // 第 3 步：取出全部同哈希候选。索引是 multimap，故可能有多个。
-    const auto range = gChunkIndex.equal_range(hash);
+    const auto range = gChunkIndex.equal_range(hash);   //hash is key
     for (auto it = range.first; it != range.second; ++it) {
         Chunk* candidate = it->second;
         // 第 4 步：逐字节确认。哈希相同不足以判定重复，必须内容完全一致。
@@ -67,8 +67,9 @@ auto isExist(const ChunkHash &hash) -> bool {
 /**
  * 精确存在性查询：与 chunkStore 的查重段相同，但只读、不计数、不插入。
  * 用于 2.3 拆分式判定「这个大块此前是否已存储」；逐字节校验保证不误判。
+ * 是否存在？存在则返回指针；不存在则返回nullptr
  */
-auto lookup(std::string_view content) -> Chunk* {
+auto lookup(const std::string_view content) -> Chunk* {
     const ChunkHash hash = getChunkHash(content);
     const auto range = gChunkIndex.equal_range(hash);
     for (auto it = range.first; it != range.second; ++it) {

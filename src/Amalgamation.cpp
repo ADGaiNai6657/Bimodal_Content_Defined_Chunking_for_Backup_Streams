@@ -27,30 +27,30 @@ namespace {
 
     /**
      * 把 [a, a+count) 这 count 个小块逐个按“小块”发射。
-     * starts[j] 是第 j 个小块的起始字节偏移，故第 j 个小块是 [starts[j], starts[j+1])。
+     * pos[j] 是第 j 个小块的起始字节偏移，故第 j 个小块是 [pos[j], pos[j+1])。
      * transition 区与尾部残余都走这里；每发射一个就累加 gAmSmallEmitted。
      */
     auto emitSmallsAt(const std::string& data,
-                      const std::vector<std::size_t>& starts,
+                      const std::vector<std::size_t>& pos,
                       const std::size_t a,
                       const std::size_t count)
                       -> void {
         for (std::size_t j = a; j < a + count; ++j) {
-            emitChunk(data, starts[j], starts[j + 1]);
+            emitChunk(data, pos[j], pos[j + 1]);
             ++gAmSmallEmitted;
         }
     }
 
     /**
      * 把从第 a 个小块开始的 k 个小块合成一个大块并发射。
-     * 这 k 个小块在源数据里首尾相接，所以大块就是 [starts[a], starts[a+k]) 一段连续字节。
+     * 这 k 个小块在源数据里首尾相接，所以大块就是 [pos[a], pos[a+k]) 一段连续字节。
      */
     auto emitBigAt(const std::string& data,
-                   const std::vector<std::size_t>& starts,
+                   const std::vector<std::size_t>& pos,
                    const std::size_t a,
                    const std::size_t k)
                    -> void {
-        emitChunk(data, starts[a], starts[a + k]);
+        emitChunk(data, pos[a], pos[a + k]);
         ++gAmBigChunks;
     }
 
@@ -67,39 +67,39 @@ auto processFileAmalgamation(const std::string& data, const AmalgamationConfig& 
     }
 
     // ① 小块器一次扫完整条流，得到所有小块切点。
-    const std::vector<std::size_t> cuts = findBoundaries(data, config.small);
+    const std::vector<std::size_t> cutsPos = findBoundaries(data, config.small);
 
     // 展开成“小块起点数组”：首尾各补一个哨兵 0 与 data.size()，
     // 于是共有 m = starts.size()-1 个小块，第 j 个为 [starts[j], starts[j+1])。
     std::vector<std::size_t> starts;
-    starts.reserve(cuts.size() + 2);
-    starts.push_back(0);
-    starts.insert(starts.end(), cuts.begin(), cuts.end());
-    starts.push_back(data.size());
-    const std::size_t m = starts.size() - 1;
+    starts.reserve(cutsPos.size() + 2); //预分配内存，通过.end获取的迭代器仍然指向最后一个元素的下一个位置！
+    starts.push_back(0);    //哨兵节点
+    starts.insert(starts.end(), cutsPos.begin(), cutsPos.end());
+    starts.push_back(data.size());  //依旧哨兵节点
+    const std::size_t m = starts.size() - 1;    //实际chunk数 = 边界数（含哨兵） - 1
     gAmSmallChunks += m;
 
-    vPosition.back().assign(cuts.begin(), cuts.end()); // 报告用：记录小块切点。
+    vPosition.back().assign(cutsPos.begin(), cutsPos.end()); // 报告用：记录小块切点。
 
     // k 至少为 1，避免除零/空大块。
     const std::size_t k = (config.k == 0) ? 1 : config.k;
 
-    // ② 大块重复状态缓存：-1 未知 / 0 非重复 / 1 重复，按“起始小块下标”索引。
+    // ② 大块重复状态缓存：-1 未知 / 0 非重复 / 1 重复，按“起始小块下标”索引。 <-  约定
     //    懒查询 + 缓存，避免同一窗口被重复查询。
     std::vector<int> isDup(m, -1);
     const std::string_view view{data}; // 零拷贝视图，供 lookup 使用。
 
     // 查询第 a 个小块开始、长度为 k 的大块是否“以前存过”（只读，不写入）。
     const auto queryBig = [&](const std::size_t a) -> bool {
-        if (a + k > m) {
+        if (a + k > m) {    //m为chunk的总数量
             return false; // 不足 k 个小块，构不成大块。
         }
-        if (isDup[a] < 0) {
+        if (isDup[a] < 0) { //未查询过？ 进行查询
             const std::string_view big = view.substr(starts[a], starts[a + k] - starts[a]);
-            isDup[a] = (lookup(big) != nullptr) ? 1 : 0;
+            isDup[a] = (lookup(big) != nullptr) ? 1 : 0;    //存储过则为1，即重复；否则为未重复
             ++gAmQueryCount;
         }
-        return isDup[a] == 1;
+        return isDup[a] == 1;   //确定为存储过才返回true（重复），未存储过或未知都返回false（未重复）
     };
 
     bool isPrevDupBig = false; // 上一个大块是否为重复块（用于识别“刚离开重复区”）。

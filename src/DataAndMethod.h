@@ -21,6 +21,7 @@
 #include <deque>
 #include <vector>
 
+#include "Chunker.h"
 #include "Hash.h"
 
 struct Chunk;
@@ -30,17 +31,10 @@ using ChunkHash = Sha1Digest;
 
 using ull = unsigned long long;
 
-// ---------------------------------------------------------------------------
-// TTTD 算法参数（迁移自 TTTD_Experiments/TTTD_Algorithm.cpp）
-// TTTD = Twin Threshold Two Divisors：
-//   主除数决定常规切点；备份除数在主规则长时间不命中时兜底；
-//   块达到 MAX_T 仍无主规则切点时，用最近的备份切点或强制切分。
-// ---------------------------------------------------------------------------
-inline constexpr std::size_t CONST_VALUE_MAIN_D = 540;        // 主除数，决定常规切点。
-inline constexpr std::size_t CONST_VALUE_SECOND_D = 270;      // 备份除数，兜底切点。
-inline constexpr std::size_t MAX_T = 2800;                    // 块达到该大小强制切分。
-inline constexpr std::size_t MIN_T = 460;                     // 该大小之前不产生边界。
-inline constexpr std::size_t MY_LENGTH = 48;                  // 滑动窗口哈希的字节数。
+// TTTD 算法参数（迁移自 TTTD_Experiments/TTTD_Algorithm.cpp）：
+// 原先这里的 CONST_VALUE_MAIN_D / CONST_VALUE_SECOND_D / MIN_T / MAX_T / MY_LENGTH
+// 已统一为 Chunker.h 中的 kBaselineParams（见 Chunker.h），baseline pFinder 与
+// 2.4 的小块器共用同一份定义，避免两处各写一遍。
 
 // 每个文件一组的切点位置（文件内偏移），仅用于报告与调试。
 inline std::vector<std::vector<ull>> vPosition;

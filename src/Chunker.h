@@ -24,6 +24,19 @@ struct ChunkerParams {
     std::size_t window;  // 滑动窗口字节数；必须满足 window <= minT。
 };
 
+// ---------------------------------------------------------------------------
+// baseline 大块器的默认 TTTD 参数（论文 §2.2，迁移自 TTTD_Experiments）。
+// 平均块长 ≈ minT + mainD ≈ 1000 字节。baseline pFinder 与 2.4 的小块器都由此派生，
+// 是全局唯一的一份基准参数定义，避免各处重复书写。
+// ---------------------------------------------------------------------------
+inline constexpr ChunkerParams kBaselineParams{
+        540,   // mainD   主除数，决定常规切点。
+        270,   // secondD 备份除数，主规则长时间不命中时兜底。
+        460,   // minT    该大小之前不产生边界。
+        2800,  // maxT    块达到该大小仍无主规则切点时强制切分。
+        48     // window  滑动窗口哈希的字节数。
+};
+
 // 纯函数分块器（区间版）：返回 [b0, b1] 内的切点位置（升序），不发射、不改全局状态。
 //
 // 关键约定：
@@ -31,8 +44,11 @@ struct ChunkerParams {
 //   - 窗口取自整段 data（可越过 b0 左端），因此靠近 b0 的切点仍受前面字节影响，保持“内容定义”。
 //   - min/max 的起算点是 b0（即把 b0 当作块起点）。
 //   - 返回的切点严格落在 (b0, b1] 内；调用方负责处理两端残余。
-auto findBoundariesInRange(std::string_view data, std::size_t b0, std::size_t b1,
-                           const ChunkerParams& params) -> std::vector<std::size_t>;
+auto findBoundariesInRange(std::string_view data,
+                           std::size_t b0,
+                           std::size_t b1,
+                           const ChunkerParams& params)
+-> std::vector<std::size_t>;
 
 // 全流分块：等价于 findBoundariesInRange(data, 0, data.size(), params)。
 // 2.4 合成式先用它一次扫完整条流得到所有小块切点。

@@ -16,6 +16,7 @@
 #include <string_view>
 
 // SHA-1 摘要：固定 160 位 = 20 字节。作为去重索引的 key。
+//长度为20的，类型为uint_8的数组，提供STL接口
 using Sha1Digest = std::array<std::uint8_t, 20>;
 
 // 内容哈希入口：对一段字节计算完整 SHA-1 摘要（160 位）。

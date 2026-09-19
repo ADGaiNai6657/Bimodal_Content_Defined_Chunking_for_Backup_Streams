@@ -29,7 +29,7 @@
 
 | 需要的能力 | 现状 | 差距 |
 | --- | --- | --- |
-| 参数化分块器 | 已抽出 `src/Chunker.h`（`ChunkerParams` / `findBoundaries` / `findBoundariesInRange` / `deriveSmallParams`） | 无需新增，直接复用；2.4 只需一次**全流**小块分块 |
+| 参数化分块器 | 已抽出 `src/Chunker.h`（`kBaselineParams` / `ChunkerParams` / `findBoundaries` / `findBoundariesInRange` / `deriveSmallParams`）；baseline `pFinder` 也已改为调用 `findBoundaries` | 无需新增，直接复用；2.4 只需一次**全流**小块分块 |
 | 精确存在性查询 | `lookup(std::string_view) -> Chunk*` 已具备（只读 + 逐字节） | 无需新增 |
 | 两种粒度 emit | `emitChunk` 写全局 `vChunks.back()` | 可复用，但要保证每个文件先 `vChunks.emplace_back()` |
 | 内容哈希 | 已是完整 SHA-1（`getChunkHash`） | 碰撞可忽略，大块重复判定走 `lookup` 即可 |
@@ -168,6 +168,7 @@ processFile_Amalgamation(file):
 - `src/Chunker.h/.cpp`：公共纯分块器 `ChunkerParams` / `findBoundariesInRange` / `findBoundaries` / `deriveSmallParams`。
 - `src/Amalgamation.h/.cpp`：`AmalgamationConfig` / `processFileAmalgamation` / 统计量 / 复位函数。
 - `DataAndMethod` 保留公共原语（`chunkStore` / `lookup` / `isExist` / `emitChunk` / SHA-1）。
+  其中 baseline `pFinder` 现复用 `findBoundaries(kBaselineParams)`，只负责发射与记账，切点逻辑与 2.4/2.3 同源。
 - `Baseline.cpp` 菜单：`4` = 2.4 @DataSet_3，`6` = 2.4 @DataSet_4；选后追加询问大块平均尺寸。
 - 统计输出：`smallChunks / bigChunks / dupBigChunks / queries / emittedSmalls / DER`。
 

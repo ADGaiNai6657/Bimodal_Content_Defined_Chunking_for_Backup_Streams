@@ -7,17 +7,9 @@
 
 #include "DataAndMethod.h"
 
-// 内部哈希原语（仅本编译单元使用，故只做前向声明）。
-auto getHashValue(std::string_view content) -> std::uint64_t;
-
 /** 内容哈希入口：对一段字节计算完整 SHA-1 摘要。 */
 auto getChunkHash(const std::string_view str) -> ChunkHash {
     return sha1(str);
-}
-
-/** Calculate the hash value of one data window (SHA-1 截断为 64 位). */
-auto getHashValue(const std::string_view content) -> std::uint64_t {
-    return sha1WindowHash(content);
 }
 
 /** Return the window ending at the given position. */
@@ -65,55 +57,28 @@ auto pFinder(std::vector<std::string>& str) -> void {
 }
 
 /**
- * TTTD 核心：对单个数据流产生边界，结果存入 vPosition 的最后一组。
- * 逻辑迁移自 TTTD_Experiments/TTTD_Algorithm.cpp 的 pFinder。
- * 主/备份除数固定不变（不做块大时的除数切换）。
+ * baseline TTTD：用基准参数 kBaselineParams 对单个数据流分块，并把块发射给 ChunkStore。
+ *
+ * 切点计算复用公共分块器 findBoundaries（与 2.4 小块器同一份实现），本函数只负责：
+ *   1) 为这条流建立 vPosition / vChunks 记录组；
+ *   2) 按相邻切点逐块 emitChunk，最后补上尾部。
+ *
+ * 等价性说明：TTTD 的切点判定只依赖内容窗口哈希，从不查询 ChunkStore，因此
+ * “先算切点、再统一发射”与旧版“边扫描边发射”得到的边界、发射顺序与统计完全一致。
  */
 auto pFinder(const std::string& str) -> void {
     vPosition.emplace_back();
-    std::vector<ull>& boundaries = vPosition.back();
     vChunks.emplace_back();
 
-    std::size_t last_P = 0;      // 上一个已保存边界的位置。
-    std::size_t backupBreak = 0; // 最新的备份边界候选。
+    // 公共分块器返回基准参数下的全部切点（不含文件末尾哨兵）。
+    const std::vector<std::size_t> boundaries = findBoundaries(str, kBaselineParams);
+    vPosition.back().assign(boundaries.begin(), boundaries.end()); // 报告用：记录切点。
 
-    for (std::size_t p = 0; p <= str.length(); p++) {
-        const std::string_view subString = getSubString(str, p, MY_LENGTH);
-        const std::size_t hash = getHashValue(subString); // 对当前窗口取哈希。
-
-        if (p - last_P < MIN_T) {
-            continue; // 保持最小块长。
-        }
-
-        if (hash % CONST_VALUE_SECOND_D == CONST_VALUE_SECOND_D - 1) {
-            backupBreak = p; // 记住最新的备份边界。
-        }
-
-        if (hash % CONST_VALUE_MAIN_D == CONST_VALUE_MAIN_D - 1) {
-            emitChunk(str, last_P, p); // 发射 [last_P, p) 为一整块。
-            boundaries.push_back(p);   // 优先使用主规则边界。
-            backupBreak = 0;
-            last_P = p;
-            continue;
-        }
-
-        if (p - last_P < MAX_T) {
-            continue; // 达到最大块长前继续搜索。
-        }
-
-        if (backupBreak != 0) {
-            emitChunk(str, last_P, backupBreak); // 发射 [last_P, backupBreak) 为一块。
-            last_P = backupBreak;                // 使用已保存的备份边界。
-            boundaries.push_back(backupBreak);
-            backupBreak = 0;
-        } else {
-            emitChunk(str, last_P, p); // 发射 [last_P, p) 为一块。
-            boundaries.push_back(p);   // 否则在最大块长处强制切分。
-            last_P = p;
-            backupBreak = 0;
-        }
+    std::size_t last_P = 0; // 上一个已发射块的起点。
+    for (const std::size_t boundary : boundaries) {
+        emitChunk(str, last_P, boundary); // 发射 [last_P, boundary) 为一整块。
+        last_P = boundary;
     }
-
     emitChunk(str, last_P, str.size()); // 补上尾部剩余数据。
 }
 

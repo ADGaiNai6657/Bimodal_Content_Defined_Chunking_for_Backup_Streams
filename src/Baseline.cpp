@@ -41,13 +41,8 @@ constexpr std::size_t kAmSmallDivisor = 4;
 // 小块器 = 基准 / kAmSmallDivisor，大块 = kAmSmallDivisor*scale 个小块，
 // 于是大块平均块长 ≈ scale × 基准平均块长，与 2.3 的尺寸菜单口径一致。
 auto makeAmalgamationConfig(const std::size_t scale) -> AmalgamationConfig {
-    const ChunkerParams base{
-            CONST_VALUE_MAIN_D,
-            CONST_VALUE_SECOND_D,
-            MIN_T,
-            MAX_T,
-            MY_LENGTH};
-    const ChunkerParams small = deriveSmallParams(base, kAmSmallDivisor);
+    // 基准参数统一取自 Chunker.h 的 kBaselineParams，避免与 baseline 各写一份。
+    const ChunkerParams small = deriveSmallParams(kBaselineParams, kAmSmallDivisor);
     return {small, scale * kAmSmallDivisor};
 }
 

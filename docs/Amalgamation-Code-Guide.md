@@ -46,15 +46,15 @@
 
 ### 1.2 函数顺序（按数据流）
 
-1. `src/Chunker.h` —— 先认类型：`ChunkerParams`(`:19`)。
+1. `src/Chunker.h` —— 先认类型：`ChunkerParams`(`:19`) 与基准参数 `kBaselineParams`(`:32`)。
 2. `src/Chunker.cpp:14 findBoundariesInRange` / `:68 findBoundaries` —— 最基础的“怎么切”。
 3. `src/Amalgamation.h:32 AmalgamationConfig` —— 2.4 的参数：`{ small, k }`。
 4. `src/Amalgamation.cpp:60 processFileAmalgamation` —— 2.4 的主循环（最核心）。
 5. `src/Amalgamation.cpp:33 emitSmallsAt` / `:48 emitBigAt` —— 主循环调用的两种发射。
 6. `src/Amalgamation.cpp:93 queryBig` —— 大块“以前存过吗”（只读 `lookup`）。
 7. `src/ChunkStore.cpp:71 lookup` —— 精确只读查询。
-8. `src/DataAndMethod.cpp:51 emitChunk` —— 主循环与存储之间的桥。
-9. `src/Baseline.cpp:117 processFile` / `:136 processDirectory` / `:185 resolver` —— 驱动层。
+8. `src/DataAndMethod.cpp:43 emitChunk` —— 主循环与存储之间的桥。
+9. `src/Baseline.cpp:112 processFile` / `:131 processDirectory` / `:180 resolver` —— 驱动层。
 10. `tools/make_synthetic_backups.py` —— 合成测试数据。
 
 ---
@@ -74,6 +74,8 @@
 | `window` | 滑动窗口字节数 | 取哈希的窗口大小，本项目 48 |
 
 > 直觉：平均块长 ≈ `minT + mainD`。小块器取基准的 1/4，平均约 250 B。
+
+> 基准参数 `kBaselineParams`（`Chunker.h:32`）= `{mainD=540, secondD=270, minT=460, maxT=2800, window=48}`，是全局唯一一份；baseline `pFinder` 与 2.4 小块器都由它派生。
 
 ### `AmalgamationConfig`（`Amalgamation.h:32`）
 
@@ -106,6 +108,8 @@ struct AmalgamationConfig {
 
 - `findBoundariesInRange(data, b0, b1, params)`（`Chunker.cpp:14`）：只扫 `[b0, b1]`，窗口取自整段 `data`（可越过 `b0` 左端），`min/max` 从 `b0` 起算。
 - `findBoundaries(data, params)`（`Chunker.cpp:68`）：等价于 `findBoundariesInRange(data, 0, data.size(), params)`。2.4 用它**一次扫完整条流**得到所有小块切点。
+
+> **基准分块同源**：baseline 的 `pFinder`（`DataAndMethod.cpp:69`）现在也调用 `findBoundaries(str, kBaselineParams)`，只额外负责发射与 `vPosition`/`vChunks` 记账。因此“找切点”只有这一份实现，baseline 与 2.4/2.3 不会各自漂移。由于 TTTD 判定从不查询 ChunkStore，这种“先算切点再统一发射”与旧版“边扫描边发射”完全等价（已用输出逐行比对验证）。
 
 核心循环（对每个字节位置 `pos`）：
 
@@ -232,17 +236,17 @@ emitBigAt(data, starts, a, k):               // Amalgamation.cpp:48
 
 ## 6. 桥接层与驱动层
 
-### `emitChunk`（`DataAndMethod.cpp:51`）
+### `emitChunk`（`DataAndMethod.cpp:43`）
 
 把 `[begin, end)` 切片交给 `chunkStore`，并往 `vChunks.back()` 追加一条出现记录。所有发射都走它。
 
 ### `Baseline.cpp`
 
-- `makeAmalgamationConfig(scale)`（`:43`）：基准参数 / 4 得小块器，`k = 4×scale`。
-- `processFile`（`:117`）：读整个文件到一个 `std::string`，按模式调用 `pFinder`（baseline）或 `processFileAmalgamation`（2.4）；用完即释放。
-- `processDirectory`（`:136`）：收集目录下文件、**排序**（保证备份按版本先后处理），逐个处理；文件少时逐文件打印增量。
-- `resolver`（`:185`）：入口分发。
-- `main`（`:226`）：菜单；选 2.4 后再问大块尺寸。
+- `makeAmalgamationConfig(scale)`（`:43`）：基准参数 `kBaselineParams` / 4 得小块器，`k = 4×scale`。
+- `processFile`（`:112`）：读整个文件到一个 `std::string`，按模式调用 `pFinder`（baseline）或 `processFileAmalgamation`（2.4）；用完即释放。
+- `processDirectory`（`:131`）：收集目录下文件、**排序**（保证备份按版本先后处理），逐个处理；文件少时逐文件打印增量。
+- `resolver`（`:180`）：入口分发。
+- `main`（`:221`）：菜单；选 2.4 后再问大块尺寸。
 
 ---
 

@@ -65,7 +65,7 @@
 │   ├── Hash.h / Hash.cpp                 # SHA-1 封装（内容摘要 / 窗口哈希 / 桶哈希）
 │   ├── DataAndMethod.h / .cpp            # TTTD 参数、类型、存储全局量、baseline pFinder
 │   ├── ChunkStore.cpp                    # 去重存储：chunkStore / isExist / lookup
-│   ├── Chunker.h / Chunker.cpp           # 大/小块共用的纯 TTTD 分块器
+│   ├── Chunker.h / Chunker.cpp           # 公共纯 TTTD 分块器（baseline 与 2.4 共用）
 │   ├── Amalgamation.h / .cpp             # 2.4 合成式
 │   └── Baseline.cpp                      # 驱动：菜单、读文件、逐文件统计
 └── tools/

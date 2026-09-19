@@ -64,7 +64,7 @@ auto sha1WindowHash(const std::string_view data) -> std::uint64_t {
  * 用 memcpy 而非 reinterpret_cast，避免对齐与严格别名问题。
  */
 auto Sha1DigestHash::operator()(const Sha1Digest& digest) const noexcept -> std::size_t {
-    std::uint64_t value = 0;
+    std::uint64_t value = 0;    //uint64_t即64位，即八字节
     std::memcpy(&value, digest.data(), sizeof(value)); // 安全地读前 8 字节。
     return static_cast<std::size_t>(value);
 }
