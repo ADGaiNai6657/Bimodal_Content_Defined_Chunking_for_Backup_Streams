@@ -116,12 +116,13 @@ auto processFileAmalgamation(const std::string& data, const AmalgamationConfig& 
             break;
         }
 
-        bool emitted = false;
+        bool foundDup = false;
 
         // ③ 前向搜索（论文 Fig.3 lines 2-6）：在 buf[0..k_smallsPerBig] 中找第一个重复大块。
         //    只有 [bigStart, bigStart+k_smallsPerBig) 完整落在流内时才检查。
+        //    对齐流程图：先把整个 pos=0..k 搜索完，transition 判断放在循环外。
         for (std::size_t lookahead = 0;
-             lookahead <= k_smallsPerBig && nextSmall + lookahead + k_smallsPerBig <= smallCount;
+             lookahead <= k_smallsPerBig && nextSmall + lookahead + k_smallsPerBig <= smallCount;//for循环只会移动pos至两个bigChunk长！
              ++lookahead) {
             const std::size_t bigStart = nextSmall + lookahead;
 
@@ -131,31 +132,33 @@ auto processFileAmalgamation(const std::string& data, const AmalgamationConfig& 
                 emitBigAt(data, smallStartBoundaries, bigStart, k_smallsPerBig);
                 ++gAmDupBigChunks;
                 prevBigWasDup = true;
-                nextSmall = bigStart + k_smallsPerBig; // 消费掉前导小块与该大块。
-                emitted = true;
-                break;
-            }
-
-            if (prevBigWasDup) {
-                // 离开重复区（论文 Fig.3 lines 7-8）：当前 k_smallsPerBig 个小块整体按小块发射。
-                emitSmallsAt(data, smallStartBoundaries, nextSmall, k_smallsPerBig);
-                prevBigWasDup = false;
-                nextSmall += k_smallsPerBig;
-                emitted = true;
+                nextSmall = bigStart + k_smallsPerBig; // 消费掉前导小块与该大块。 即，切换游标
+                foundDup = true;
                 break;
             }
         }
 
-        if (emitted) {
+//------------------------------------------------------------------------------
+
+        if (foundDup) { //找到了大块？跳过这次while；由于游标已经切换，因此则会从已找到大块的最右边开始
             continue;
         }
 
-        // ④ 前 k_smallsPerBig 个小块内没有重复大块，且不处于“离开重复区”：
-        //    把它们合成一个大块发射（大片新数据内部，论文 Fig.3 lines 9-10）。
+        // ④ 搜索失败后才判断是否刚离开重复区（对齐流程图 K 分支）：
+        //    是 -> 当前 k_smallsPerBig 个小块整体按小块发射（论文 Fig.3 lines 7-8）。
+        if (prevBigWasDup) {    //没找到大块？检查游标前是否为大块；是？说明前为老数据，后为新数据，处于边界处，应发射小块
+            emitSmallsAt(data, smallStartBoundaries, nextSmall, k_smallsPerBig);
+            prevBigWasDup = false;
+            nextSmall += k_smallsPerBig;
+            continue;
+        }
+
+        //没找到大块，前面也不是大块？说明在新数据内部，应发射大块
+        // ⑤ 大片新数据内部：把前 k_smallsPerBig 个小块合成一个大块发射（论文 Fig.3 lines 9-10）。
         emitBigAt(data, smallStartBoundaries, nextSmall, k_smallsPerBig);
         // 依正文语义这里应置 false（Fig.3 line 10 印成 true，与“Sections fresh data” 说明矛盾）。
-        prevBigWasDup = false;
-        nextSmall += k_smallsPerBig;
+        prevBigWasDup = false; //此处应为论文错误：如果处于 新数据->旧数据 的边界处，如果这里为true，则会导致系统在新数据内部无法发出连续的大块
+        nextSmall += k_smallsPerBig;    //游标后拨
     }
 }
 
