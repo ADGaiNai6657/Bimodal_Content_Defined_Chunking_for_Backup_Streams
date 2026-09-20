@@ -204,7 +204,7 @@ auto processFileAmalgamationKVar(const std::string& data, const AmalgamationConf
         return;
     }
 
-    // ① 小块器一次扫完整条流，得到所有小块切点，并展开成小块起点数组。
+    // ① 小块器一次扫完整条流，得到所有小块切点，并展开成小块起点数组。 换言之， 处理成边界vector，并计算小chunk数，修改计数器
     const std::vector<std::size_t> smallCuts = findBoundaries(data, config.small);
     std::vector<std::size_t> smallStart;
     smallStart.reserve(smallCuts.size() + 2);
@@ -230,26 +230,29 @@ auto processFileAmalgamationKVar(const std::string& data, const AmalgamationConf
                 smallStart[firstSmall],
                 smallStart[firstSmall + len] - smallStart[firstSmall]);
         if (len == 1 && queryNonEmitted) {
-            return lookup(content) != nullptr || gSmallPresence.contains(getChunkHash(content));
+            return lookup(content) != nullptr || gSmallPresence.contains(getChunkHash(content));    //只要曾经单独作为小块存储过 或 作为大块包含过，则返回 true
         }
-        return lookup(content) != nullptr;
+        return lookup(content) != nullptr;  //查询后不等于空指针——即有过存储？返回 true
     };
 
     bool prevBigWasDup = false; // 上一个大块是否为重复块。
-    std::size_t nextSmall = 0;  // 当前待处理的第一块小块下标。
+    std::size_t nextSmall = 0;  // 当前待处理的第一块小块下标。   即，游标
 
     while (nextSmall < smallCount) {
-        const std::size_t remaining = smallCount - nextSmall;
-        bool foundDup = false;
+        const std::size_t remaining = smallCount - nextSmall;   //当游标运动到靠近右边界的时候，会出现剩余的小chunk数不足k的情况。这个时候，我们使用remain而非k
+        bool foundDup = false;  //每移动一次游标，都会重置此参数
 
         // ③ 前向搜索：起点 nextSmall+lookahead，长度从长到短，优先合成更长的大块。
         //    lookahead 最多 kMax-1，共约 kMax 个起点 × kMax 种长度。
         const std::size_t maxLookahead = std::min(kMax, remaining) - 1;
-        for (std::size_t lookahead = 0; lookahead <= maxLookahead && !foundDup; ++lookahead) {
-            const std::size_t bigStart = nextSmall + lookahead;
-            const std::size_t maxLen = std::min(kMax, smallCount - bigStart);
-            for (std::size_t len = maxLen; len >= 1; --len) {
-                if (isBigStored(bigStart, len)) {
+
+        for (std::size_t lookahead = 0; lookahead <= maxLookahead && !foundDup; ++lookahead) {  //当且仅当游标在k内，且未找到重复大chunk前才找，不然直接跳过这次查找
+
+            const std::size_t bigStart = nextSmall + lookahead; //大chunk开始的绝对位置计算，为 游标 + lookahead（lookahead逐渐递增， 0 -> k(or remain)）
+            const std::size_t maxLen = std::min(kMax, smallCount - bigStart);   //要么是K，要么是剩下的数量（以拟定的大chunk的下标计算），即为大chunk的最大长度
+
+            for (std::size_t len = maxLen; len >= 1; --len) {   //从最长长度开始查找，依次递减
+                if (isBigStored(bigStart, len)) {   //找到了大块？将大chunk下标前的小chunk发射、将大chunk发射
                     // 命中：前面的 lookahead 个小块零散发，[bigStart, bigStart+len) 合成大块发。
                     emitSmallsAt(data, smallStart, nextSmall, lookahead); // 前导小块
                     rememberSmalls(data, smallStart, nextSmall, lookahead);
@@ -262,18 +265,21 @@ auto processFileAmalgamationKVar(const std::string& data, const AmalgamationConf
                     break;
                 }
             }
+
         }
-        if (foundDup) {
+
+        if (foundDup) { //找到了大chunk？从最新的游标处重新开始查
             continue;
         }
 
         // ④ 没找到重复大块：接下来的 span 个小块要么作 transition 发小块，要么合成一个大块。
-        const std::size_t span = std::min(kMax, remaining);
-        if (prevBigWasDup) {
+        //span为数量，而非下标
+        const std::size_t span = std::min(kMax, remaining); //中间时取k，靠近右边界时取剩余的chunk数，即为remain
+        if (prevBigWasDup) {    //上一个是大块，游标处未找到大块？说明位于 旧数据 -> 新数据 边界，应当发射小块
             // 离开重复区：按小块发（论文 Fig.3 lines 7-8）。
             emitSmallsAt(data, smallStart, nextSmall, span);
             rememberSmalls(data, smallStart, nextSmall, span);
-        } else {
+        } else {    //上一个不是大块，这里也不是？说明位于 新数据 内部，应当发射大块
             // 新鲜区：合成一个大块（尾部不足 kMax 时自动变短，不再需要单独的尾块处理）。
             emitBigAt(data, smallStart, nextSmall, span);
             rememberSmalls(data, smallStart, nextSmall, span);
