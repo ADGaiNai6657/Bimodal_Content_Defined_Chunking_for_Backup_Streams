@@ -35,7 +35,5 @@ out/
 Thumbs.db
 
 # Large dataset archives (too large for git)
-Dataset/DataSet_1/
-Dataset/DataSet_2/
+# DataSet_1/2/4 已入库；DataSet_3 的单文件超过 GitHub 100 MiB 限制，保持忽略。
 Dataset/DataSet_3/
-Dataset/DataSet_4/
