@@ -74,7 +74,8 @@ k-fixed 把大块写死为恰好 `k` 个小块；k-var 则放宽为 **`1..k` 个
 │   ├── Amalgamation-Design.md            # 2.4 设计文档
 │   ├── Amalgamation-Code-Guide.md        # 2.4 代码导读 + 文件阅读顺序
 │   ├── Breaking-Apart-Design.md          # 2.3 背景设计（算法实现见 breaking-apart 分支）
-│   └── ChunkStore-Dedup-Walkthrough.md   # ChunkStore 查重逻辑详解
+│   ├── ChunkStore-Dedup-Walkthrough.md   # ChunkStore 查重逻辑详解
+│   └── QueryNonEmittedSmalls-Experiment.md # k-var 非发射小块开关的原理与实验报告
 ├── src/
 │   ├── Hash.h / Hash.cpp                 # SHA-1 封装（内容摘要 / 窗口哈希 / 桶哈希）
 │   ├── DataAndMethod.h / .cpp            # TTTD 参数、类型、存储全局量、baseline pFinder
@@ -186,6 +187,7 @@ dedupRatio       = totalBytes / uniqueBytes（即论文的 DER）
 | [`docs/Amalgamation-Code-Guide.md`](docs/Amalgamation-Code-Guide.md) | 代码逐层讲解、文件/函数阅读顺序、Q&A（含 k-var 4.5 节） |
 | [`docs/Breaking-Apart-Design.md`](docs/Breaking-Apart-Design.md) | 2.3 背景设计（实现见 `breaking-apart` 分支） |
 | [`docs/ChunkStore-Dedup-Walkthrough.md`](docs/ChunkStore-Dedup-Walkthrough.md) | 去重存储的逐行解析与不变量 |
+| [`docs/QueryNonEmittedSmalls-Experiment.md`](docs/QueryNonEmittedSmalls-Experiment.md) | k-var `queryNonEmittedSmalls` 开关的作用原理与 ON/OFF 实验报告 |
 
 ---
 
