@@ -48,14 +48,15 @@
 
 1. `src/Chunker.h` —— 先认类型：`ChunkerParams`(`:19`) 与基准参数 `kBaselineParams`(`:32`)。
 2. `src/Chunker.cpp:14 findBoundariesInRange` / `:68 findBoundaries` —— 最基础的“怎么切”。
-3. `src/Amalgamation.h:32 AmalgamationConfig` —— 2.4 的参数：`{ small, k }`。
-4. `src/Amalgamation.cpp:61 processFileAmalgamation` —— 2.4 的主循环（最核心）。
-5. `src/Amalgamation.cpp:33 emitSmallsAt` / `:49 emitBigAt` —— 主循环调用的两种发射。
-6. `src/Amalgamation.cpp:94 isBigStored` —— 大块“以前存过吗”（只读 `lookup`）。
-7. `src/ChunkStore.cpp:71 lookup` —— 精确只读查询。
-8. `src/DataAndMethod.cpp:43 emitChunk` —— 主循环与存储之间的桥。
-9. `src/Baseline.cpp:112 processFile` / `:131 processDirectory` / `:180 resolver` —— 驱动层。
-10. `tools/make_synthetic_backups.py` —— 合成测试数据。
+3. `src/Amalgamation.h:32 AmalgamationConfig` —— 2.4 的参数：`{ small, k, queryNonEmittedSmalls }`。
+4. `src/Amalgamation.cpp:89 processFileAmalgamation` —— k-fixed 的主循环（最核心）。
+5. `src/Amalgamation.cpp:35 emitSmallsAt` / `:51 emitBigAt` —— 主循环调用的两种发射。
+6. `src/Amalgamation.cpp:122 isBigStored`（k-fixed）—— 大块“以前存过吗”（只读 `lookup`）。
+7. `src/Amalgamation.cpp:199 processFileAmalgamationKVar` —— k-var 变体主循环。
+8. `src/ChunkStore.cpp:71 lookup` —— 精确只读查询。
+9. `src/DataAndMethod.cpp:43 emitChunk` —— 主循环与存储之间的桥。
+10. `src/Baseline.cpp:112 processFile` / `:133 processDirectory` / `:182 resolver` —— 驱动层。
+11. `tools/make_synthetic_backups.py` —— 合成测试数据。
 
 ---
 
@@ -90,7 +91,7 @@ struct AmalgamationConfig {
 
 > 实现细节：`processFileAmalgamation` 把 `config.k` 读入局部变量 `k_smallsPerBig`（比单字母更易读），后续都用它；配置字段本身仍叫 `k`。
 
-### 统计量（`Amalgamation.h:44-48`）
+### 统计量（`Amalgamation.h:51-55`）
 
 全局计数器，用来解释算法行为：
 
@@ -100,7 +101,7 @@ struct AmalgamationConfig {
 - `gAmQueryCount`：大块存在性查询次数（论文：每大块最多 k 次）。
 - `gAmSmallEmitted`：以小块的粒度单独发射的小块数（前导 + transition + 尾块）。
 
-> 复用统计量前，驱动层会先调 `resetAmalgamationStats()`（`Amalgamation.cpp:163`）清零。
+> 复用统计量前，驱动层会先调 `resetAmalgamationStats()`（`Amalgamation.cpp:287`）清零（k-var 的 `gSmallPresence` 也一并清空）。
 
 ---
 
@@ -137,7 +138,7 @@ else                  { last_P = pos;         boundaries.push_back(pos); }
 
 ---
 
-## 4. 主循环 `processFileAmalgamation`（`Amalgamation.cpp:61`）
+## 4. 主循环 `processFileAmalgamation`（k-fixed，`Amalgamation.cpp:89`）
 
 这是 2.4 的心脏。按段拆：
 
@@ -154,7 +155,7 @@ const std::size_t smallCount = smallStart.size() - 1;    // 小块总数
 
 - `smallStart` 是“每个小块的起始字节偏移”：第 `j` 个小块是 `[smallStart[j], smallStart[j+1])`。
 - 大块也用它表示：从第 `firstSmall` 个小块起的 `k` 个小块合成的大块，就是 `[smallStart[firstSmall], smallStart[firstSmall+k])`。
-- 空流直接返回（`Amalgamation.cpp:65`）。
+- 空流直接返回（`Amalgamation.cpp:94`）。
 
 ### 4.2 “这个大块重复吗？”——查询与缓存
 
@@ -206,16 +207,50 @@ while (nextSmall < smallCount) {
 ### 4.4 两种发射 `emitSmallsAt` / `emitBigAt`
 
 ```cpp
-emitSmallsAt(data, smallStart, firstSmall, numSmalls):   // Amalgamation.cpp:33
+emitSmallsAt(data, smallStart, firstSmall, numSmalls):   // Amalgamation.cpp:35
     for smallIndex in [firstSmall, firstSmall+numSmalls):
         emitChunk(data, smallStart[smallIndex], smallStart[smallIndex+1]); ++gAmSmallEmitted;
 
-emitBigAt(data, smallStart, firstSmall, k):   // Amalgamation.cpp:49
+emitBigAt(data, smallStart, firstSmall, k):   // Amalgamation.cpp:51
     emitChunk(data, smallStart[firstSmall], smallStart[firstSmall+k]); ++gAmBigChunks;
 ```
 
 - 小块逐段发射；大块把 `k` 个小块**当一段连续字节**一次发射（源数据里本就相邻，无需拼接）。
 - 两者都经过 `emitChunk`（`DataAndMethod.cpp:43`），由 `chunkStore` 负责去重与统计。
+
+### 4.5 k-var 变体 `processFileAmalgamationKVar`
+
+与 `processFileAmalgamation` 结构相同，只有“找重复大块”这一步不同：
+
+```cpp
+const auto isBigStored = [&](firstSmall, len) -> bool {           // Amalgamation.cpp
+    if (firstSmall + len > smallCount) return false;
+    ++gAmQueryCount;
+    const std::string_view content = dataView.substr(smallStart[firstSmall],
+        smallStart[firstSmall + len] - smallStart[firstSmall]);
+    if (len == 1 && queryNonEmitted)                              // 非发射小块也算“存在”
+        return lookup(content) != nullptr || gSmallPresence.contains(getChunkHash(content));
+    return lookup(content) != nullptr;
+};
+
+for (lookahead = 0; lookahead <= maxLookahead && !foundDup; ++lookahead) {
+    bigStart = nextSmall + lookahead;
+    for (len = min(k, smallCount - bigStart); len >= 1; --len)    // 从长到短，优先大块
+        if (isBigStored(bigStart, len)) {
+            emitSmalls(nextSmall, lookahead);                     // 前导小块
+            emitBig(bigStart, len);
+            ...
+            break;
+        }
+}
+```
+
+- 每个起点尝试 `1..k` 全部长度，优先长块；k-fixed 在每个起点只试长度 `k`。
+- `gSmallPresence`（`Amalgamation.cpp` 匿名命名空间）保存“只作为大块组成部分出现过”的小块哈希：每次发射后用 `rememberSmalls` 登记被消费的小块，供后续 `len == 1` 的存在性判断使用（对应论文 k-var 的 Bloom filter；这里用精确集合）。
+- **参数 `queryNonEmittedSmalls`**（默认 `false`，仅 k-var 有效）：关闭时“曾被吞咽的小块”不算存在（`lookup` 找不到）；打开时 `len == 1` 会额外查 `gSmallPresence`，把这类小块也当作重复证据，边界更细，但更占内存、可能切碎大块。完整说明（含与主索引的对比、示例）见 `docs/Amalgamation-Design.md` §3.6.1。
+- 新鲜区把 `min(k, 剩余)` 个小块合成一个大块，因此**没有独立的尾块处理**。
+- 统计复用同一组 `gAm*` 计数器；`resetAmalgamationStats()` 会一并清空 `gSmallPresence`。
+- 菜单项 `7`/`8` 走的就是这个函数（`Baseline.cpp`）。
 
 ---
 
@@ -251,10 +286,10 @@ emitBigAt(data, smallStart, firstSmall, k):   // Amalgamation.cpp:49
 ### `Baseline.cpp`
 
 - `makeAmalgamationConfig(scale)`（`:43`）：基准参数 `kBaselineParams` / 4 得小块器，`k = 4×scale`。
-- `processFile`（`:112`）：读整个文件到一个 `std::string`，按模式调用 `pFinder`（baseline）或 `processFileAmalgamation`（2.4）；用完即释放。
-- `processDirectory`（`:131`）：收集目录下文件、**排序**（保证备份按版本先后处理），逐个处理；文件少时逐文件打印增量。
-- `resolver`（`:180`）：入口分发。
-- `main`（`:221`）：菜单；选 2.4 后再问大块尺寸。
+- `processFile`（`:112`）：读整个文件到一个 `std::string`，按模式调用 `pFinder`（baseline）、`processFileAmalgamation`（k-fixed）或 `processFileAmalgamationKVar`（k-var）；用完即释放。
+- `processDirectory`（`:133`）：收集目录下文件、**排序**（保证备份按版本先后处理），逐个处理；文件少时逐文件打印增量。
+- `resolver`（`:182`）：入口分发。
+- `main`（`:223`）：菜单；选 k-fixed（4/6）或 k-var（7/8）后再问大块尺寸。
 
 ---
 
@@ -316,8 +351,8 @@ g++ -std=c++20 -O2 -Wall -Wextra src/Baseline.cpp src/DataAndMethod.cpp \
 
 # 运行（菜单）
 ./baseline
-# 1/3/5 → baseline；4 → 2.4(DataSet_3)；6 → 2.4(DataSet_4，合成)
-# 选 4/6 后会再问大块尺寸：1≈1k / 2≈4k / 3≈16k / 4≈32k
+# 1/3/5 → baseline；4/6 → k-fixed(DataSet_3/4)；7/8 → k-var(DataSet_3/4)
+# 选 4/6/7/8 后会再问大块尺寸：1≈1k / 2≈4k / 3≈16k / 4≈32k
 ```
 
 生成合成备份流：

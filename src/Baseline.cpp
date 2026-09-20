@@ -31,8 +31,8 @@
 
 using ull = unsigned long long;
 
-// 处理模式：baseline（TTTD 直接分块）或合成式（论文 2.4）。
-enum class Mode { Baseline, Amalgamation };
+// 处理模式：baseline（TTTD 直接分块）、k-fixed 合成式、k-var 合成式（论文 2.4）。
+enum class Mode { Baseline, Amalgamation, AmalgamationKVar };
 
 // 合成式小块器相对基准参数的缩小倍数（论文小块平均块长约为大块的 1/4 ~ 1/8）。
 constexpr std::size_t kAmSmallDivisor = 4;
@@ -95,7 +95,7 @@ auto reportFileDelta(const std::filesystem::path& path,
               << " uniqueBytes+=" << (after.uniqueBytes - before.uniqueBytes)
               << " cumDER=" << std::fixed << std::setprecision(4) << cumDer;
 
-    if (mode == Mode::Amalgamation) {
+    if (mode != Mode::Baseline) {
         std::cout << " small+=" << (after.amSmall - before.amSmall)
                   << " big+=" << (after.amBig - before.amBig)
                   << " dupBig+=" << (after.amDupBig - before.amDupBig)
@@ -120,8 +120,10 @@ auto processFile(const std::filesystem::path& path, const Mode mode) -> void {
                        std::istreambuf_iterator<char>());
     if (mode == Mode::Baseline) { // 普通模式还是合成式？
         pFinder(buffer);
-    } else {
+    } else if (mode == Mode::Amalgamation) {
         processFileAmalgamation(buffer, gAmalgamationConfig);
+    } else {
+        processFileAmalgamationKVar(buffer, gAmalgamationConfig);
     }
 }
 
@@ -237,10 +239,12 @@ int main() {
               << "  1) DataSet_1 —— tar.gz 压缩包（baseline TTTD）\n"
               << "  2) DataSet_2 —— 解压源码树（baseline TTTD，递归）\n"
               << "  3) DataSet_3 —— 未压缩 tar（baseline TTTD）\n"
-              << "  4) DataSet_3 —— 合成式（论文 2.4）\n"
+              << "  4) DataSet_3 —— 合成式 k-fixed（论文 2.4）\n"
               << "  5) DataSet_4 —— 合成备份流（baseline TTTD）\n"
-              << "  6) DataSet_4 —— 合成式（论文 2.4）\n"
-              << "请输入 1/2/3/4/5/6: ";
+              << "  6) DataSet_4 —— 合成式 k-fixed（论文 2.4）\n"
+              << "  7) DataSet_3 —— 合成式 k-var（论文 2.4 变体）\n"
+              << "  8) DataSet_4 —— 合成式 k-var（论文 2.4 变体）\n"
+              << "请输入 1-8: ";
 
     int choice = 0;
     if (!(std::cin >> choice)) {
@@ -279,6 +283,16 @@ int main() {
             recursive = false;
             mode = Mode::Amalgamation;
             break;
+        case 7:
+            target = kDataSet3;
+            recursive = false;
+            mode = Mode::AmalgamationKVar;
+            break;
+        case 8:
+            target = kDataSet4;
+            recursive = false;
+            mode = Mode::AmalgamationKVar;
+            break;
         default:
             std::cerr << "无效选择：" << choice << '\n';
             return 1;
@@ -290,7 +304,7 @@ int main() {
         return 1;
     }
 
-    if (mode == Mode::Amalgamation) {
+    if (mode != Mode::Baseline) {
         std::cout << "选择大块平均尺寸：\n"
                   << "  1) 约 1k（baseline 同参）\n"
                   << "  2) 约 4k\n"
@@ -309,18 +323,25 @@ int main() {
             default: scale = 1; break;
         }
         gAmalgamationConfig = makeAmalgamationConfig(scale); // 通过用户选定的规模来计算 Config。
+        // k-var 额外查询“只作为大块组成部分出现过”的小块（论文 k-var 的 Bloom filter 特性）。
+        gAmalgamationConfig.queryNonEmittedSmalls = (mode == Mode::AmalgamationKVar);
         resetAmalgamationStats();                            // 重置计数器。
         std::cout << "小块参数 mainD=" << gAmalgamationConfig.small.mainD
                   << " secondD=" << gAmalgamationConfig.small.secondD
                   << " minT=" << gAmalgamationConfig.small.minT
                   << " maxT=" << gAmalgamationConfig.small.maxT
                   << " window=" << gAmalgamationConfig.small.window
-                  << "，每 " << gAmalgamationConfig.k << " 个小块合成 1 个大块\n";
+                  << "，每 " << gAmalgamationConfig.k << " 个小块合成 1 个大块"
+                  << (mode == Mode::AmalgamationKVar ? "（k-var：大块长度 1..k，另查非发射小块）"
+                                                     : "（k-fixed）")
+                  << '\n';
     }
 
     std::cout << "运行项 " << choice << "：" << target.string()
               << (recursive ? "（递归）" : "（不递归）")
-              << (mode == Mode::Amalgamation ? "  算法=合成式2.4" : "  算法=baseline TTTD")
+              << (mode == Mode::Baseline ? "  算法=baseline TTTD"
+                                         : mode == Mode::Amalgamation ? "  算法=合成式k-fixed"
+                                                                      : "  算法=合成式k-var")
               << '\n';
 
     resolver(target, recursive, mode); // 切分。
@@ -349,7 +370,7 @@ int main() {
                                : 0.0)
               << '\n';
 
-    if (mode == Mode::Amalgamation) {
+    if (mode != Mode::Baseline) {
         std::cout << "smallChunks=" << gAmSmallChunks
                   << " bigChunks=" << gAmBigChunks
                   << " dupBigChunks=" << gAmDupBigChunks

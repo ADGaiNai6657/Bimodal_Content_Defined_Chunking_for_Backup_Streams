@@ -17,7 +17,9 @@
 
 #include "Amalgamation.h"
 
+#include <algorithm>
 #include <string_view>
+#include <unordered_set>
 #include <utility>
 #include <vector>
 
@@ -53,6 +55,32 @@ namespace {
                    -> void {
         emitChunk(data, smallStart[firstSmall], smallStart[firstSmall + k_smallsPerBig]);
         ++gAmBigChunks;
+    }
+
+    // ---- k-var 专用：非发射小块的“出现过”集合 --------------------------------
+    // 论文 k-var 会查询“以前出现过、但只作为某个大块的一部分被发射”的小块，
+    // 以便在更细的粒度上识别重复边界。这里用精确集合保存这些小块的 SHA-1 内容哈希；
+    // 论文用 Bloom filter（允许假阳性、省内存），精确集合不会误判，代价是更占内存。
+    std::unordered_set<ChunkHash, Sha1DigestHash> gSmallPresence;
+
+    // 记录第 smallIndex 个小块“出现过”（内容哈希写入集合）。
+    auto rememberSmall(const std::string& data,
+                       const std::vector<std::size_t>& smallStart,
+                       const std::size_t smallIndex) -> void {
+        const std::string_view content(
+                data.data() + smallStart[smallIndex],   //str.data()返回C风格指针，通过 +smallStart[]进行指针的移动
+                smallStart[smallIndex + 1] - smallStart[smallIndex]);   //通过两边界位置信息相减，计算chunk长度
+        gSmallPresence.insert(getChunkHash(content));
+    }
+
+    // 记录 [firstSmall, firstSmall+count) 这 count 个小块“出现过”。
+    auto rememberSmalls(const std::string& data,
+                        const std::vector<std::size_t>& smallStart,
+                        const std::size_t firstSmall,
+                        const std::size_t count) -> void {
+        for (std::size_t i = firstSmall; i < firstSmall + count; ++i) {
+            rememberSmall(data, smallStart, i);
+        }
     }
 
 } // namespace
@@ -157,8 +185,101 @@ auto processFileAmalgamation(const std::string& data, const AmalgamationConfig& 
         // ⑤ 大片新数据内部：把前 k_smallsPerBig 个小块合成一个大块发射（论文 Fig.3 lines 9-10）。
         emitBigAt(data, smallStartBoundaries, nextSmall, k_smallsPerBig);
         // 依正文语义这里应置 false（Fig.3 line 10 印成 true，与“Sections fresh data” 说明矛盾）。
-        prevBigWasDup = false; //此处应为论文错误：如果处于 新数据->旧数据 的边界处，如果这里为true，则会导致系统在新数据内部无法发出连续的大块
+        prevBigWasDup = false; //此处应为论文错误：处于新数据内部时，如果这里为true，则会导致系统在新数据内部无法发出连续的大块
         nextSmall += k_smallsPerBig;    //游标后拨
+    }
+}
+
+// k-var 合成式（论文 2.4 的变体）：大块可以是 1..k 个连续小块的任意组合。
+// 与 k-fixed 的唯一区别在“找重复大块”这一步：
+//   k-fixed 在每个起点只查固定长度 k；
+//   k-var   在每个起点把长度从 k 递减到 1 全部查一遍，优先匹配更长的大块。
+// 若开启 queryNonEmittedSmalls，还会把“只作为大块组成部分出现过”的小块
+// 也纳入存在性判断（见 gSmallPresence），用于更细粒度的重复识别。
+auto processFileAmalgamationKVar(const std::string& data, const AmalgamationConfig& config) -> void {
+    vPosition.emplace_back();
+    vChunks.emplace_back();
+
+    if (data.empty()) {
+        return;
+    }
+
+    // ① 小块器一次扫完整条流，得到所有小块切点，并展开成小块起点数组。
+    const std::vector<std::size_t> smallCuts = findBoundaries(data, config.small);
+    std::vector<std::size_t> smallStart;
+    smallStart.reserve(smallCuts.size() + 2);
+    smallStart.push_back(0);                                                     // 首哨兵
+    smallStart.insert(smallStart.end(), smallCuts.begin(), smallCuts.end());
+    smallStart.push_back(data.size());                                           // 尾哨兵
+    const std::size_t smallCount = smallStart.size() - 1;                        // 小块总数
+    gAmSmallChunks += smallCount;
+    vPosition.back().assign(smallCuts.begin(), smallCuts.end());                 // 报告用
+
+    const std::size_t kMax = (config.k == 0) ? 1 : config.k;                     // k
+    const bool queryNonEmitted = config.queryNonEmittedSmalls;
+    const std::string_view dataView{data};
+
+    // ② 查询从 firstSmall 起、长度为 len（1..k）的大块是否“以前存过”。
+    //    len == 1 且开启 queryNonEmitted 时，还看它是否只作为大块的一部分“出现过”。
+    const auto isBigStored = [&](const std::size_t firstSmall, const std::size_t len) -> bool {
+        if (firstSmall + len > smallCount) {
+            return false; // 超出流尾，构不成大块。
+        }
+        ++gAmQueryCount; // k-var 每次候选都发一次查询（论文约 k(k-1) 次/大块）。
+        const std::string_view content = dataView.substr(
+                smallStart[firstSmall],
+                smallStart[firstSmall + len] - smallStart[firstSmall]);
+        if (len == 1 && queryNonEmitted) {
+            return lookup(content) != nullptr || gSmallPresence.contains(getChunkHash(content));
+        }
+        return lookup(content) != nullptr;
+    };
+
+    bool prevBigWasDup = false; // 上一个大块是否为重复块。
+    std::size_t nextSmall = 0;  // 当前待处理的第一块小块下标。
+
+    while (nextSmall < smallCount) {
+        const std::size_t remaining = smallCount - nextSmall;
+        bool foundDup = false;
+
+        // ③ 前向搜索：起点 nextSmall+lookahead，长度从长到短，优先合成更长的大块。
+        //    lookahead 最多 kMax-1，共约 kMax 个起点 × kMax 种长度。
+        const std::size_t maxLookahead = std::min(kMax, remaining) - 1;
+        for (std::size_t lookahead = 0; lookahead <= maxLookahead && !foundDup; ++lookahead) {
+            const std::size_t bigStart = nextSmall + lookahead;
+            const std::size_t maxLen = std::min(kMax, smallCount - bigStart);
+            for (std::size_t len = maxLen; len >= 1; --len) {
+                if (isBigStored(bigStart, len)) {
+                    // 命中：前面的 lookahead 个小块零散发，[bigStart, bigStart+len) 合成大块发。
+                    emitSmallsAt(data, smallStart, nextSmall, lookahead); // 前导小块
+                    rememberSmalls(data, smallStart, nextSmall, lookahead);
+                    emitBigAt(data, smallStart, bigStart, len);           // 内部已累加 gAmBigChunks
+                    ++gAmDupBigChunks;
+                    rememberSmalls(data, smallStart, bigStart, len);
+                    prevBigWasDup = true;
+                    nextSmall = bigStart + len;
+                    foundDup = true;
+                    break;
+                }
+            }
+        }
+        if (foundDup) {
+            continue;
+        }
+
+        // ④ 没找到重复大块：接下来的 span 个小块要么作 transition 发小块，要么合成一个大块。
+        const std::size_t span = std::min(kMax, remaining);
+        if (prevBigWasDup) {
+            // 离开重复区：按小块发（论文 Fig.3 lines 7-8）。
+            emitSmallsAt(data, smallStart, nextSmall, span);
+            rememberSmalls(data, smallStart, nextSmall, span);
+        } else {
+            // 新鲜区：合成一个大块（尾部不足 kMax 时自动变短，不再需要单独的尾块处理）。
+            emitBigAt(data, smallStart, nextSmall, span);
+            rememberSmalls(data, smallStart, nextSmall, span);
+        }
+        prevBigWasDup = false;
+        nextSmall += span;
     }
 }
 
@@ -169,4 +290,5 @@ auto resetAmalgamationStats() -> void {
     gAmDupBigChunks = 0;
     gAmQueryCount = 0;
     gAmSmallEmitted = 0;
+    gSmallPresence.clear(); // k-var 的“出现过”集合也要清空。
 }

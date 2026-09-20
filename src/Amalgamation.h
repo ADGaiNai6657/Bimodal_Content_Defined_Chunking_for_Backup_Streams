@@ -31,12 +31,20 @@
 // 2.4 合成式参数。
 struct AmalgamationConfig {
     ChunkerParams small;   // 小块器参数：先跑它得到整条流的小块切点。
-    std::size_t k;         // 每个大块由 k 个连续小块合成（k-fixed，与论文记法一致）。
+    std::size_t k;         // 每个大块最多由 k 个连续小块合成（k-fixed/k-var 通用）。
+
+    // 仅 k-var 有效：是否额外查询“以前出现过、但只作为某个大块的一部分被发射”的小块，
+    // 以便在更细的粒度上识别重复（论文 k-var 的 Bloom filter 特性）。
+    bool queryNonEmittedSmalls = false;
 };
 
-// 对一条数据流执行合成式分块，并把块发射给 ChunkStore（去重）。
+// 对一条数据流执行 k-fixed 合成式分块（大块固定 k 个小块），并发射给 ChunkStore。
 // 内部会为本条流追加一组 vPosition / vChunks 记录。
 auto processFileAmalgamation(const std::string& data, const AmalgamationConfig& config) -> void;
+
+// k-var 变体（论文 2.4）：大块长度可变（1..k 个连续小块），并在每个小块位置查询。
+// 查询量约为 k(k-1) 次/大块，比 k-fixed 更费查询，但能识别更多、更灵活的大块。
+auto processFileAmalgamationKVar(const std::string& data, const AmalgamationConfig& config) -> void;
 
 // ---------------------------------------------------------------------------
 // 统计量（供程序末尾汇总，解释算法行为）
