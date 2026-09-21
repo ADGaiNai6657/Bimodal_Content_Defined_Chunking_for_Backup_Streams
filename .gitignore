@@ -37,3 +37,6 @@ Thumbs.db
 # Large dataset archives (too large for git)
 # DataSet_1/2/4 已入库；DataSet_3 的单文件超过 GitHub 100 MiB 限制，保持忽略。
 Dataset/DataSet_3/
+
+# PPT 已拆分为独立 git 仓库（ppt/.git），主仓库不再跟踪
+ppt/
